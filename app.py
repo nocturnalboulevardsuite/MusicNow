@@ -13,7 +13,7 @@ ytmusic = get_ytmusic()
 # Configuración de la página
 st.set_page_config(page_title="MusicNow", layout="centered")
 
-# CSS Global con tipografía Inter, Ola RGBIC y eliminación de 'Press Enter to apply'
+# CSS Global con tipografía Inter, Ola RGBIC y Buscador Integrado
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap');
@@ -70,41 +70,50 @@ st.markdown("""
     }
 
     @keyframes rgbWaveSweep {
-        0% {
-            background-position: 100% 0%;
-        }
-        100% {
-            background-position: 0% 0%;
-        }
+        0% { background-position: 100% 0%; }
+        100% { background-position: 0% 0%; }
     }
 
-    /* OCULTAR MENSAJE 'Press Enter to apply' */
+    /* ELIMINAR POR COMPLETO 'Press Enter to apply' */
     div[data-testid="stInputInstructions"], 
-    small[data-testid="stInputInstructions"] {
+    small[data-testid="stInputInstructions"],
+    .stInputInstructions,
+    [data-testid="stInputInstructions"] * {
         display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
     }
 
-    /* Buscador minimalista redondeado */
-    .stTextInput > div > div {
+    /* CONTENEDOR DEL BUSCADOR CON BOTÓN INTEGRADO */
+    .search-container {
+        position: relative !important;
+        width: 100% !important;
+        margin-top: 10px !important;
+        margin-bottom: 20px !important;
+    }
+
+    .search-container div[data-testid="stTextInput"] {
+        width: 100% !important;
+    }
+
+    .search-container input {
         background-color: #16161a !important;
         border-radius: 25px !important;
         border: 2px solid #ff2222 !important;
-        padding: 2px 10px !important;
+        color: #ffffff !important;
+        font-family: 'Inter', sans-serif !important;
+        font-size: 0.95rem !important;
+        padding: 10px 100px 10px 18px !important; /* Margen a la derecha para que el texto no toque el botón */
+        height: 48px !important;
         box-shadow: 0 4px 15px rgba(255, 34, 34, 0.15) !important;
         transition: all 0.3s ease !important;
     }
 
-    .stTextInput > div > div:focus-within {
+    .search-container input:focus {
         border-color: #ff5555 !important;
         box-shadow: 0 0 15px rgba(255, 34, 34, 0.35) !important;
-    }
-
-    .stTextInput input {
-        background-color: transparent !important;
-        color: #ffffff !important;
-        font-family: 'Inter', sans-serif !important;
-        font-size: 1rem !important;
-        padding: 10px 10px !important;
     }
 
     div[data-baseweb="input"] {
@@ -112,27 +121,34 @@ st.markdown("""
         border: none !important;
     }
 
-    /* Botón de Buscar Específico (Rojo Opaco Elegante) */
-    .search-btn-wrapper .stButton>button {
-        background-color: #821c1c !important; 
-        color: #ffffff !important; 
-        font-family: 'Inter', sans-serif !important;
-        font-size: 0.95rem !important;
-        font-weight: 700 !important;
-        border: 1px solid #a82424 !important; 
-        border-radius: 25px !important; 
-        width: 100% !important; 
-        text-align: center !important; 
-        padding: 10px 16px !important;
-        transition: all 0.2s ease !important;
-        box-shadow: 0 4px 12px rgba(130, 28, 28, 0.3) !important;
+    /* BOTÓN EN LA PUNTA DERECHA (ROJO OPACO) */
+    .search-btn-inside {
+        position: absolute !important;
+        right: 5px !important;
+        top: 5px !important;
+        z-index: 10 !important;
+        width: 88px !important;
     }
-    
-    .search-btn-wrapper .stButton>button:hover { 
-        background-color: #a82424 !important; 
-        border-color: #ff2222 !important; 
-        box-shadow: 0 0 12px rgba(255, 34, 34, 0.4) !important;
-        transform: translateY(-1px);
+
+    .search-btn-inside .stButton > button {
+        background-color: #7a1d1d !important; /* Rojo opaco */
+        color: #ffffff !important;
+        font-family: 'Inter', sans-serif !important;
+        font-size: 0.88rem !important;
+        font-weight: 700 !important;
+        border: 1px solid #9e2626 !important;
+        border-radius: 20px !important;
+        height: 38px !important;
+        padding: 0 !important;
+        text-align: center !important;
+        transition: all 0.2s ease !important;
+        box-shadow: none !important;
+    }
+
+    .search-btn-inside .stButton > button:hover {
+        background-color: #9e2626 !important;
+        border-color: #ff2222 !important;
+        box-shadow: 0 0 10px rgba(255, 34, 34, 0.3) !important;
     }
 
     /* Botones de sugerencias de canciones */
@@ -292,19 +308,19 @@ html_vinilo = f"""
 altura_componente = 340 if st.session_state.video_id else 200
 components.html(html_vinilo, height=altura_componente)
 
-# Buscador minimalista con botón alineado
-col_input, col_btn = st.columns([3.3, 1], vertical_alignment="bottom")
+# BARRA DE BÚSQUEDA CON BOTÓN "BUSCAR" DENTRO DE LA PUNTA
+st.markdown('<div class="search-container">', unsafe_allow_html=True)
 
-with col_input:
-    query_input = st.text_input("", placeholder="Buscar canción, artista o género...", label_visibility="collapsed")
+query_input = st.text_input("", placeholder="Buscar canción, artista o género...", label_visibility="collapsed")
 
-with col_btn:
-    st.markdown('<div class="search-btn-wrapper">', unsafe_allow_html=True)
-    btn_buscar = st.button("Buscar", key="btn_buscar_action")
-    st.markdown('</div>', unsafe_allow_html=True)
+st.markdown('<div class="search-btn-inside">', unsafe_allow_html=True)
+btn_buscar = st.button("Buscar", key="btn_buscar_inside")
+st.markdown('</div>', unsafe_allow_html=True)
 
-# Actualizar término de búsqueda al presionar el botón "Buscar"
-if btn_buscar and query_input:
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Actualizar término de búsqueda al hacer clic en 'Buscar' o al presionar Enter
+if (btn_buscar or query_input) and query_input:
     st.session_state.current_query = query_input
 
 # Resultados
