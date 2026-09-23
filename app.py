@@ -60,7 +60,7 @@ st.markdown("""
         100% { background-position: 0% 0%; }
     }
 
-    /* ELIMINACIÓN DE "PRESS ENTER TO APPLY" */
+    /* ELIMINACIÓN TOTAL Y DEFICITIVA DE "PRESS ENTER TO APPLY" */
     div[data-testid="InputInstructions"], 
     div[data-testid="stInputInstructions"],
     [data-testid="stInputInstructions"],
@@ -83,7 +83,7 @@ st.markdown("""
         box-shadow: none !important;
     }
 
-    /* DISEÑO DE LA BARRA DE BÚSQUEDA */
+    /* DISEÑO DE LA BARRA DE BÚSQUEDA LARGA Y EXTENDIDA */
     div[data-testid="stTextInput"] {
         margin-bottom: 0px !important;
     }
@@ -111,20 +111,21 @@ st.markdown("""
         height: 42px !important;
     }
 
-    /* ESTILO DEL BOTÓN BUSCAR */
-    div[data-testid="column"]:nth-child(2) button {
+    /* BOTÓN DE BÚSQUEDA COMPACTO A LA IZQUIERDA */
+    div[data-testid="column"]:nth-child(1) button {
         height: 46px !important;
         border-radius: 12px !important;
         background-color: #1a1618 !important;
         border: 1px solid #ff2222 !important;
         color: #ffffff !important;
         font-weight: 600 !important;
-        font-size: 0.95rem !important;
+        font-size: 0.9rem !important;
         transition: all 0.2s ease !important;
         box-shadow: 0 0 8px rgba(255, 34, 34, 0.15) !important;
+        padding: 0px 12px !important;
     }
 
-    div[data-testid="column"]:nth-child(2) button:hover {
+    div[data-testid="column"]:nth-child(1) button:hover {
         background-color: #ff2222 !important;
         border-color: #ff2222 !important;
         color: #ffffff !important;
@@ -253,9 +254,9 @@ altura_componente = 340 if st.session_state.video_id else 200
 components.html(html_vinilo, height=altura_componente)
 
 # ---------------------------------------------------------
-# BLOQUE DE BÚSQUEDA CENTRADO Y SIMÉTRICO
+# BLOQUE DE BÚSQUEDA ALINEADO COMPLETO (ANCHO TOTAL 680px)
 # ---------------------------------------------------------
-pad_left, col_btn, col_input, pad_right = st.columns([0.35, 1.1, 3.8, 0.35], vertical_alignment="bottom")
+col_btn, col_input = st.columns([0.8, 4.2], vertical_alignment="bottom")
 
 with col_btn:
     btn_buscar = st.button("Buscar", use_container_width=True)
