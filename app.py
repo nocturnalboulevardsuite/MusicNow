@@ -220,13 +220,13 @@ html_reproductor_completo = f"""
         align-items: center; 
         justify-content: flex-start; 
         margin: 0; 
-        padding: 18px 0;
+        padding: 15px 0;
         font-family: 'Inter', system-ui, -apple-system, sans-serif;
         color: #ffffff;
         overflow: hidden;
     }}
     .vinyl-wrapper {{
-        padding: 12px;
+        padding: 15px;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -239,6 +239,8 @@ html_reproductor_completo = f"""
                     conic-gradient(from 45deg, #050505, #3d3d3d 22deg, #050505 45deg, #050505 225deg, #3d3d3d 247deg, #050505 270deg);
         box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 20px {v_color};
         border: 1px solid #1a1a1a;
+        cursor: pointer;
+        user-select: none;
     }}
     .center-label {{
         width: 68px; height: 68px; border-radius: 50%;
@@ -262,7 +264,7 @@ html_reproductor_completo = f"""
         border: 1px solid #2a2a30;
         border-radius: 16px;
         padding: 16px 20px;
-        margin-top: 14px;
+        margin-top: 10px;
         box-shadow: 0 0 20px rgba(0,0,0,0.6), 0 0 10px {v_color}40;
     }}
     .song-details {{
@@ -330,6 +332,7 @@ html_reproductor_completo = f"""
         gap: 8px;
         transition: transform 0.2s ease, box-shadow 0.2s ease;
         box-shadow: 0 0 10px {v_color}80;
+        user-select: none;
     }}
     .btn-play:hover {{
         transform: scale(1.04);
@@ -365,12 +368,11 @@ html_reproductor_completo = f"""
     /* REPRODUCTOR OCULTO PERO ACTIVO DENTRO DEL VIEWPORT */
     .hidden-yt-wrapper {{
         position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        width: 2px;
-        height: 2px;
-        opacity: 0.001;
+        top: 0;
+        left: 0;
+        width: 1px;
+        height: 1px;
+        opacity: 0.01;
         pointer-events: none;
         z-index: -10;
         overflow: hidden;
@@ -387,14 +389,14 @@ html_reproductor_completo = f"""
 </head>
 <body>
 
-    <!-- Vinilo Animado (Sin recortes) -->
+    <!-- Vinilo Animado (Clicable para pausar/reproducir) -->
     <div class="vinyl-wrapper">
-        <div id="vinyl-disk" class="vinyl">
+        <div id="vinyl-disk" class="vinyl" onclick="togglePlay()" title="Haz clic para Reproducir / Pausar">
             <div class="center-label"><div class="center-hole"></div></div>
         </div>
     </div>
 
-    <!-- Contenedor activo e in-viewport para evitar bloqueos del navegador -->
+    <!-- Elemento del reproductor de YouTube -->
     <div class="hidden-yt-wrapper">
         <div id="yt-player"></div>
     </div>
@@ -403,14 +405,13 @@ html_reproductor_completo = f"""
     {"<div class='player-card'>" if v_id else "<div style='margin-top:15px; color:#777; font-size:0.9rem;'>Selecciona una canción para reproducir</div>"}
     {"<div class='song-details'>▶ " + s_title + " — " + s_artist + "</div>" if v_id else ""}
     {"<div class='progress-container'><span id='curr-time' class='time-stamp'>0:00</span><input type='range' id='progress' class='progress-bar' value='0' min='0' max='100' oninput='seekToTime(this.value)'><span id='total-dur' class='time-stamp'>0:00</span></div>" if v_id else ""}
-    {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-pause'></i> <span id='btn-text'>Pausa</span></button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
+    {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-play'></i> <span id='btn-text'>Play</span></button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
     {"<div id='err-msg' class='error-notice'>⚠️ Esta pista no permite reproducción incrustada. Elige otra canción.</div>" if v_id else ""}
     {"</div>" if v_id else ""}
 
     <script src="https://www.youtube.com/iframe_api"></script>
     <script>
         var player;
-        var isPlaying = false;
         var videoId = "{v_id}";
         var vColor = "{v_color}";
         var updateInterval;
@@ -418,8 +419,8 @@ html_reproductor_completo = f"""
         function onYouTubeIframeAPIReady() {{
             if (!videoId) return;
             player = new YT.Player('yt-player', {{
-                height: '200',
-                width: '200',
+                height: '1',
+                width: '1',
                 videoId: videoId,
                 playerVars: {{
                     'autoplay': 1,
@@ -427,7 +428,8 @@ html_reproductor_completo = f"""
                     'disablekb': 1,
                     'fs': 0,
                     'rel': 0,
-                    'playsinline': 1
+                    'playsinline': 1,
+                    'enablejsapi': 1
                 }},
                 events: {{
                     'onReady': onPlayerReady,
@@ -438,12 +440,16 @@ html_reproductor_completo = f"""
         }}
 
         function onPlayerReady(event) {{
-            event.target.playVideo();
+            // Intentar reproducir automáticamente
+            try {{
+                event.target.playVideo();
+            }} catch(e) {{
+                console.log("Autoplay bloqueado por el navegador");
+            }}
             startUpdateLoop();
         }}
 
         function updateUIState(playing) {{
-            isPlaying = playing;
             var vinyl = document.getElementById('vinyl-disk');
             var btnIcon = document.getElementById('play-icon');
             var btnText = document.getElementById('btn-text');
@@ -462,7 +468,7 @@ html_reproductor_completo = f"""
         function onPlayerStateChange(event) {{
             if (event.data == YT.PlayerState.PLAYING) {{
                 updateUIState(true);
-            }} else if (event.data == YT.PlayerState.PAUSED || event.data == YT.PlayerState.ENDED) {{
+            }} else if (event.data == YT.PlayerState.PAUSED || event.data == YT.PlayerState.ENDED || event.data == YT.PlayerState.CUED || event.data == -1) {{
                 updateUIState(false);
             }}
         }}
@@ -540,8 +546,8 @@ html_reproductor_completo = f"""
 </html>
 """
 
-# Altura ampliada del componente iframe para alojar holgadamente el vinilo y su resplandor
-altura_componente = 410 if st.session_state.video_id else 240
+# Altura ampliada del componente para garantizar la vista completa del disco y sombra
+altura_componente = 420 if st.session_state.video_id else 240
 components.html(html_reproductor_completo, height=altura_componente)
 
 # ---------------------------------------------------------
