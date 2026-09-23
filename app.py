@@ -210,26 +210,16 @@ html_reproductor_completo = f"""
 <head>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 <style>
-    * {{
-        box-sizing: border-box;
-    }}
     body {{
         background-color: transparent; 
         display: flex; 
         flex-direction: column; 
         align-items: center; 
-        justify-content: flex-start; 
+        justify-content: center; 
         margin: 0; 
-        padding: 15px 0;
+        padding: 0;
         font-family: 'Inter', system-ui, -apple-system, sans-serif;
         color: #ffffff;
-        overflow: hidden;
-    }}
-    .vinyl-wrapper {{
-        padding: 15px;
-        display: flex;
-        justify-content: center;
-        align-items: center;
     }}
     .vinyl {{
         width: 175px; height: 175px; border-radius: 50%; position: relative; 
@@ -237,10 +227,9 @@ html_reproductor_completo = f"""
         background: radial-gradient(circle at center, transparent 38%, rgba(0,0,0,0.85) 39%, transparent 40%),
                     repeating-radial-gradient(circle at center, #0d0d0d 0px, #0d0d0d 2px, #222 3px, #141414 4px),
                     conic-gradient(from 45deg, #050505, #3d3d3d 22deg, #050505 45deg, #050505 225deg, #3d3d3d 247deg, #050505 270deg);
-        box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 20px {v_color};
+        box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 18px {v_color};
         border: 1px solid #1a1a1a;
         cursor: pointer;
-        user-select: none;
     }}
     .center-label {{
         width: 68px; height: 68px; border-radius: 50%;
@@ -264,8 +253,9 @@ html_reproductor_completo = f"""
         border: 1px solid #2a2a30;
         border-radius: 16px;
         padding: 16px 20px;
-        margin-top: 10px;
+        margin-top: 18px;
         box-shadow: 0 0 20px rgba(0,0,0,0.6), 0 0 10px {v_color}40;
+        box-sizing: border-box;
     }}
     .song-details {{
         text-align: center;
@@ -332,7 +322,6 @@ html_reproductor_completo = f"""
         gap: 8px;
         transition: transform 0.2s ease, box-shadow 0.2s ease;
         box-shadow: 0 0 10px {v_color}80;
-        user-select: none;
     }}
     .btn-play:hover {{
         transform: scale(1.04);
@@ -365,17 +354,15 @@ html_reproductor_completo = f"""
         cursor: pointer;
     }}
 
-    /* REPRODUCTOR OCULTO PERO ACTIVO DENTRO DEL VIEWPORT */
-    .hidden-yt-wrapper {{
+    /* CONTENEDOR DE AUDIO OFF-SCREEN (ACTIVO EN DOM SIN DESCUADRAR LA INTERFAZ) */
+    .offscreen-player {{
         position: absolute;
-        top: 0;
-        left: 0;
-        width: 1px;
-        height: 1px;
-        opacity: 0.01;
+        top: -9999px;
+        left: -9999px;
+        width: 200px;
+        height: 200px;
+        opacity: 0.001;
         pointer-events: none;
-        z-index: -10;
-        overflow: hidden;
     }}
 
     .error-notice {{
@@ -389,15 +376,13 @@ html_reproductor_completo = f"""
 </head>
 <body>
 
-    <!-- Vinilo Animado (Clicable para pausar/reproducir) -->
-    <div class="vinyl-wrapper">
-        <div id="vinyl-disk" class="vinyl" onclick="togglePlay()" title="Haz clic para Reproducir / Pausar">
-            <div class="center-label"><div class="center-hole"></div></div>
-        </div>
+    <!-- Vinilo Animado -->
+    <div id="vinyl-disk" class="vinyl" onclick="togglePlay()">
+        <div class="center-label"><div class="center-hole"></div></div>
     </div>
 
-    <!-- Elemento del reproductor de YouTube -->
-    <div class="hidden-yt-wrapper">
+    <!-- Contenedor invisible pero activo para la API de YouTube -->
+    <div class="offscreen-player">
         <div id="yt-player"></div>
     </div>
 
@@ -419,8 +404,8 @@ html_reproductor_completo = f"""
         function onYouTubeIframeAPIReady() {{
             if (!videoId) return;
             player = new YT.Player('yt-player', {{
-                height: '1',
-                width: '1',
+                height: '200',
+                width: '200',
                 videoId: videoId,
                 playerVars: {{
                     'autoplay': 1,
@@ -429,7 +414,8 @@ html_reproductor_completo = f"""
                     'fs': 0,
                     'rel': 0,
                     'playsinline': 1,
-                    'enablejsapi': 1
+                    'enablejsapi': 1,
+                    'origin': window.location.origin
                 }},
                 events: {{
                     'onReady': onPlayerReady,
@@ -440,11 +426,10 @@ html_reproductor_completo = f"""
         }}
 
         function onPlayerReady(event) {{
-            // Intentar reproducir automáticamente
             try {{
                 event.target.playVideo();
-            }} catch(e) {{
-                console.log("Autoplay bloqueado por el navegador");
+            }} catch (e) {{
+                console.log("El navegador bloqueó el autoplay. Se requiere clic del usuario.");
             }}
             startUpdateLoop();
         }}
@@ -468,7 +453,7 @@ html_reproductor_completo = f"""
         function onPlayerStateChange(event) {{
             if (event.data == YT.PlayerState.PLAYING) {{
                 updateUIState(true);
-            }} else if (event.data == YT.PlayerState.PAUSED || event.data == YT.PlayerState.ENDED || event.data == YT.PlayerState.CUED || event.data == -1) {{
+            }} else if (event.data == YT.PlayerState.PAUSED || event.data == YT.PlayerState.ENDED || event.data == -1 || event.data == YT.PlayerState.CUED) {{
                 updateUIState(false);
             }}
         }}
@@ -476,6 +461,7 @@ html_reproductor_completo = f"""
         function togglePlay() {{
             if (!player || typeof player.getPlayerState !== 'function') return;
             var state = player.getPlayerState();
+            // Si está reproduciendo, paúsalo. Si está en cualquier otro estado, reprodúcelo.
             if (state === YT.PlayerState.PLAYING) {{
                 player.pauseVideo();
             }} else {{
@@ -546,8 +532,7 @@ html_reproductor_completo = f"""
 </html>
 """
 
-# Altura ampliada del componente para garantizar la vista completa del disco y sombra
-altura_componente = 420 if st.session_state.video_id else 240
+altura_componente = 360 if st.session_state.video_id else 210
 components.html(html_reproductor_completo, height=altura_componente)
 
 # ---------------------------------------------------------
