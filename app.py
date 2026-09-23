@@ -266,22 +266,6 @@ html_reproductor_completo = f"""
         text-overflow: ellipsis;
         color: #f0f0f0;
     }}
-
-    /* CONTENEDOR DEL REPRODUCTOR VISIBLE */
-    .video-box {{
-        width: 100%;
-        height: 170px;
-        border-radius: 12px;
-        overflow: hidden;
-        margin-bottom: 14px;
-        border: 1px solid #2a2a30;
-        box-shadow: 0 0 12px {v_color}30;
-    }}
-    .video-box iframe {{
-        width: 100%;
-        height: 100%;
-        border: none;
-    }}
     
     /* BARRA DE PROGRESO Y TIEMPO */
     .progress-container {{
@@ -368,24 +352,45 @@ html_reproductor_completo = f"""
         box-shadow: 0 0 6px {v_color};
         cursor: pointer;
     }}
+
+    /* CONTENEDOR DE AUDIO OFF-SCREEN (ACTIVO EN DOM SIN DESCUADRAR LA INTERFAZ) */
+    .offscreen-player {{
+        position: absolute;
+        top: -9999px;
+        left: -9999px;
+        width: 200px;
+        height: 200px;
+        opacity: 0.001;
+        pointer-events: none;
+    }}
+
+    .error-notice {{
+        display: none;
+        color: #ff4444;
+        font-size: 0.82rem;
+        text-align: center;
+        margin-top: 8px;
+    }}
 </style>
 </head>
 <body>
 
-    <!-- Vinilo Animado -->
-    <div id="vinyl-disk" class="vinyl {'spin' if v_id else ''}">
+    <!-- Vinilo Animado (Original) -->
+    <div id="vinyl-disk" class="vinyl">
         <div class="center-label"><div class="center-hole"></div></div>
     </div>
 
-    <!-- Tarjeta Interactiva del Reproductor -->
+    <!-- Contenedor invisible pero activo para la API de YouTube -->
+    <div class="offscreen-player">
+        <div id="yt-player"></div>
+    </div>
+
+    <!-- Tarjeta Interactiva del Reproductor (Original) -->
     {"<div class='player-card'>" if v_id else "<div style='margin-top:15px; color:#777; font-size:0.9rem;'>Selecciona una canción para reproducir</div>"}
     {"<div class='song-details'>▶ " + s_title + " — " + s_artist + "</div>" if v_id else ""}
-    
-    <!-- Reproductor de YouTube Integrado -->
-    {f'<div class="video-box"><iframe id="yt-player-iframe" src="https://www.youtube-nocookie.com/embed/{v_id}?enablejsapi=1&autoplay=1&rel=0&playsinline=1" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>' if v_id else ''}
-
     {"<div class='progress-container'><span id='curr-time' class='time-stamp'>0:00</span><input type='range' id='progress' class='progress-bar' value='0' min='0' max='100' oninput='seekToTime(this.value)'><span id='total-dur' class='time-stamp'>0:00</span></div>" if v_id else ""}
-    {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-pause'></i> Pausa</button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
+    {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-play'></i> <span id='btn-text'>Play</span></button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
+    {"<div id='err-msg' class='error-notice'>⚠️ Esta pista no permite reproducción incrustada. Elige otra canción.</div>" if v_id else ""}
     {"</div>" if v_id else ""}
 
     <script src="https://www.youtube.com/iframe_api"></script>
@@ -394,13 +399,27 @@ html_reproductor_completo = f"""
         var isPlaying = false;
         var videoId = "{v_id}";
         var vColor = "{v_color}";
+        var updateInterval;
 
         function onYouTubeIframeAPIReady() {{
             if (!videoId) return;
-            player = new YT.Player('yt-player-iframe', {{
+            player = new YT.Player('yt-player', {{
+                height: '200',
+                width: '200',
+                videoId: videoId,
+                playerVars: {{
+                    'autoplay': 1,
+                    'controls': 0,
+                    'disablekb': 1,
+                    'fs': 0,
+                    'rel': 0,
+                    'playsinline': 1,
+                    'origin': window.location.origin
+                }},
                 events: {{
                     'onReady': onPlayerReady,
-                    'onStateChange': onPlayerStateChange
+                    'onStateChange': onPlayerStateChange,
+                    'onError': onPlayerError
                 }}
             }});
         }}
@@ -410,27 +429,35 @@ html_reproductor_completo = f"""
             startUpdateLoop();
         }}
 
-        function onPlayerStateChange(event) {{
+        function updateUIState(playing) {{
+            isPlaying = playing;
             var vinyl = document.getElementById('vinyl-disk');
             var btnIcon = document.getElementById('play-icon');
-            var btnText = document.getElementById('play-btn');
+            var btnText = document.getElementById('btn-text');
 
-            if (event.data == YT.PlayerState.PLAYING) {{
-                isPlaying = true;
+            if (playing) {{
                 if (vinyl) {{ vinyl.classList.add('spin'); vinyl.classList.remove('paused'); }}
                 if (btnIcon) btnIcon.className = "fas fa-pause";
-                if (btnText) btnText.innerHTML = '<i class="fas fa-pause"></i> Pausa';
-            }} else if (event.data == YT.PlayerState.PAUSED || event.data == YT.PlayerState.ENDED) {{
-                isPlaying = false;
+                if (btnText) btnText.innerText = "Pausa";
+            }} else {{
                 if (vinyl) {{ vinyl.classList.add('paused'); }}
                 if (btnIcon) btnIcon.className = "fas fa-play";
-                if (btnText) btnText.innerHTML = '<i class="fas fa-play"></i> Play';
+                if (btnText) btnText.innerText = "Play";
+            }}
+        }}
+
+        function onPlayerStateChange(event) {{
+            if (event.data == YT.PlayerState.PLAYING) {{
+                updateUIState(true);
+            }} else if (event.data == YT.PlayerState.PAUSED || event.data == YT.PlayerState.ENDED) {{
+                updateUIState(false);
             }}
         }}
 
         function togglePlay() {{
-            if (!player) return;
-            if (isPlaying) {{
+            if (!player || typeof player.getPlayerState !== 'function') return;
+            var state = player.getPlayerState();
+            if (state === YT.PlayerState.PLAYING) {{
                 player.pauseVideo();
             }} else {{
                 player.playVideo();
@@ -438,7 +465,7 @@ html_reproductor_completo = f"""
         }}
 
         function changeVolume(val) {{
-            if (player && player.setVolume) {{
+            if (player && typeof player.setVolume === 'function') {{
                 player.setVolume(val);
             }}
             var volSlider = document.getElementById('vol-slider');
@@ -448,13 +475,15 @@ html_reproductor_completo = f"""
         }}
 
         function seekToTime(val) {{
-            if (player && player.getDuration) {{
+            if (player && typeof player.getDuration === 'function') {{
                 var dur = player.getDuration();
-                var target = (val / 100) * dur;
-                player.seekTo(target, true);
-                var prog = document.getElementById('progress');
-                if (prog) {{
-                    prog.style.background = 'linear-gradient(to right, ' + vColor + ' ' + val + '%, #33333d ' + val + '%)';
+                if (dur > 0) {{
+                    var target = (val / 100) * dur;
+                    player.seekTo(target, true);
+                    var prog = document.getElementById('progress');
+                    if (prog) {{
+                        prog.style.background = 'linear-gradient(to right, ' + vColor + ' ' + val + '%, #33333d ' + val + '%)';
+                    }}
                 }}
             }}
         }}
@@ -467,8 +496,9 @@ html_reproductor_completo = f"""
         }}
 
         function startUpdateLoop() {{
-            setInterval(function() {{
-                if (player && player.getCurrentTime && player.getDuration) {{
+            if (updateInterval) clearInterval(updateInterval);
+            updateInterval = setInterval(function() {{
+                if (player && typeof player.getCurrentTime === 'function' && typeof player.getDuration === 'function') {{
                     var cur = player.getCurrentTime();
                     var dur = player.getDuration();
                     if (dur > 0) {{
@@ -487,12 +517,17 @@ html_reproductor_completo = f"""
                 }}
             }}, 300);
         }}
+
+        function onPlayerError(e) {{
+            var err = document.getElementById('err-msg');
+            if (err) err.style.display = 'block';
+        }}
     </script>
 </body>
 </html>
 """
 
-altura_componente = 530 if st.session_state.video_id else 210
+altura_componente = 360 if st.session_state.video_id else 210
 components.html(html_reproductor_completo, height=altura_componente)
 
 # ---------------------------------------------------------
