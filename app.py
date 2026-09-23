@@ -10,65 +10,86 @@ def get_ytmusic():
 
 ytmusic = get_ytmusic()
 
-# Configuración de la página (sin emoji en el icono)
+# Configuración de la página
 st.set_page_config(page_title="MusicNow", layout="centered")
 
-# CSS Global con fuentes góticas retro y buscador estilo burbuja
+# CSS Global con diseño elevado, tipografía Inter y efecto RGBIC
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=MedievalSharp&family=Pirata+One&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800;900&display=swap');
 
     .stApp { 
         background-color: #0e0e10; 
-        color: #e0e0e0; 
+        color: #ffffff; 
+        font-family: 'Inter', sans-serif;
     }
     
-    /* Fuente retro gótica para títulos */
-    .gothic-title {
-        font-family: 'Pirata One', cursive;
-        color: #ff2222;
-        text-align: center;
-        font-size: 5.2rem;
-        font-weight: 400;
-        margin-bottom: -10px;
-        letter-spacing: 3px;
-        text-shadow: 0 0 15px rgba(255, 34, 34, 0.4);
-    }
-    
-    .gothic-sub {
-        font-family: 'MedievalSharp', cursive;
-        color: #888888;
-        text-align: center;
-        font-size: 1.1rem;
-        letter-spacing: 2px;
-        margin-top: 0;
-        margin-bottom: 15px;
-        text-transform: uppercase;
+    /* Elevar todo el contenido hacia arriba */
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 1rem !important;
+        max-width: 680px !important;
     }
 
-    /* Contenedor del buscador "Burbujeante" (Esquinas redondeadas y amplio espacio) */
+    /* Título Minimalista */
+    .minimal-title {
+        font-family: 'Inter', sans-serif;
+        color: #ff2222;
+        text-align: center;
+        font-size: 3.8rem;
+        font-weight: 900;
+        margin-bottom: 2px;
+        letter-spacing: -1.5px;
+    }
+    
+    /* Subtítulo en Rojo */
+    .minimal-sub {
+        font-family: 'Inter', sans-serif;
+        color: #ff2222;
+        text-align: center;
+        font-size: 1.05rem;
+        font-weight: 600;
+        margin-top: 0;
+        margin-bottom: 15px;
+    }
+
+    /* Texto con efecto RGBIC animado */
+    .rgbic-text {
+        background: linear-gradient(90deg, #ff0055, #ff5000, #00f0ff, #7000ff, #ff0055);
+        background-size: 300% 300%;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: rgbicAnimation 3s ease infinite;
+        font-weight: 800;
+    }
+
+    @keyframes rgbicAnimation {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+
+    /* Buscador minimalista redondeado */
     .stTextInput > div > div {
-        background-color: #1a1a1e !important;
-        border-radius: 18px !important;
+        background-color: #16161a !important;
+        border-radius: 25px !important;
         border: 2px solid #ff2222 !important;
-        padding: 6px 12px !important;
-        box-shadow: 0 4px 20px rgba(255, 34, 34, 0.15) !important;
+        padding: 2px 10px !important;
+        box-shadow: 0 4px 15px rgba(255, 34, 34, 0.15) !important;
         transition: all 0.3s ease !important;
     }
 
     .stTextInput > div > div:focus-within {
         border-color: #ff5555 !important;
-        box-shadow: 0 0 18px rgba(255, 34, 34, 0.4) !important;
+        box-shadow: 0 0 15px rgba(255, 34, 34, 0.35) !important;
     }
 
-    /* Input interno (Amplio, sin estar aplastado) */
     .stTextInput input {
         background-color: transparent !important;
-        color: #f0f0f0 !important;
-        font-family: 'MedievalSharp', cursive, sans-serif !important;
-        font-size: 1.15rem !important;
-        padding: 12px 10px !important;
-        height: auto !important;
+        color: #ffffff !important;
+        font-family: 'Inter', sans-serif !important;
+        font-size: 1rem !important;
+        padding: 10px 10px !important;
     }
 
     div[data-baseweb="input"] {
@@ -76,41 +97,45 @@ st.markdown("""
         border: none !important;
     }
 
-    /* Botones de sugerencias con tipografía retro */
+    /* Botones de sugerencias minimalistas */
     .stButton>button {
         background-color: #16161a; 
-        color: #dcdcdc; 
-        font-family: 'MedievalSharp', cursive, sans-serif;
-        font-size: 1.05rem;
+        color: #e0e0e0; 
+        font-family: 'Inter', sans-serif;
+        font-size: 0.95rem;
+        font-weight: 500;
         border: 1px solid #2a2a30; 
         border-radius: 12px; 
         width: 100%; 
         text-align: left; 
         transition: all 0.2s ease;
-        padding: 12px 18px;
-        margin-bottom: 6px;
+        padding: 10px 16px;
+        margin-bottom: 5px;
     }
     
     .stButton>button:hover { 
         background-color: #ff2222; 
         border-color: #ff2222; 
         color: #ffffff; 
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(255, 34, 34, 0.3);
+        transform: translateY(-1px);
     }
 
     h3 {
-        font-family: 'MedievalSharp', cursive !important;
-        color: #cccccc !important;
-        font-size: 1.3rem !important;
-        margin-top: 20px !important;
+        font-family: 'Inter', sans-serif !important;
+        color: #ffffff !important;
+        font-size: 1.1rem !important;
+        font-weight: 700 !important;
+        margin-top: 15px !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# Título principal gótico
-st.markdown("<h1 class='gothic-title'>MusicNow</h1>", unsafe_allow_html=True)
-st.markdown("<p class='gothic-sub'>La rocola de la fiesta</p>", unsafe_allow_html=True)
+# Encabezado principal
+st.markdown("<h1 class='minimal-title'>MusicNow</h1>", unsafe_allow_html=True)
+st.markdown(
+    "<p class='minimal-sub'>Busca la <span class='rgbic-text'>canción o música</span> que quieras y reprodúcela ahora mismo</p>", 
+    unsafe_allow_html=True
+)
 
 # Estado global de reproducción
 if 'video_id' not in st.session_state:
@@ -125,7 +150,7 @@ def obtener_color_artista(artista):
     hash_object = hashlib.md5(artista.encode())
     return '#' + hash_object.hexdigest()[:6]
 
-# Reproductor de audio embebido
+# Reproductor embebido
 reproductor_html = ""
 clase_animacion = ""
 
@@ -136,12 +161,12 @@ if st.session_state.video_id:
         src="https://www.youtube.com/embed/{st.session_state.video_id}?autoplay=1&color=red" 
         frameborder="0" allow="autoplay; encrypted-media">
     </iframe>
-    <p style='color: #dddddd; font-family: "MedievalSharp", cursive; text-align: center; margin-top: 14px; font-size: 1.1rem;'>
+    <p style='color: #dddddd; font-family: "Inter", sans-serif; text-align: center; margin-top: 12px; font-size: 0.95rem; font-weight: 600;'>
         Reproduciendo: {st.session_state.song_title}
     </p>
     """
 
-# HTML / CSS del Vinilo Realista
+# Componente HTML del Vinilo
 html_vinilo = f"""
 <!DOCTYPE html>
 <html>
@@ -154,12 +179,12 @@ html_vinilo = f"""
         align-items: center; 
         justify-content: center; 
         margin: 0; 
-        padding: 5px 0;
+        padding: 0;
     }}
     
     .vinyl {{
-        width: 190px; 
-        height: 190px; 
+        width: 185px; 
+        height: 185px; 
         border-radius: 50%;
         position: relative; 
         display: flex; 
@@ -171,20 +196,20 @@ html_vinilo = f"""
             repeating-radial-gradient(circle at center, #0d0d0d 0px, #0d0d0d 2px, #222 3px, #141414 4px),
             conic-gradient(from 45deg, #050505, #3d3d3d 22deg, #050505 45deg, #050505 225deg, #3d3d3d 247deg, #050505 270deg);
             
-        box-shadow: 0 10px 25px rgba(0,0,0,0.95), inset 0 0 1px rgba(255,255,255,0.25);
+        box-shadow: 0 8px 22px rgba(0,0,0,0.9), inset 0 0 1px rgba(255,255,255,0.2);
         border: 1px solid #1a1a1a;
     }}
     
     .center-label {{
-        width: 68px; 
-        height: 68px; 
+        width: 66px; 
+        height: 66px; 
         border-radius: 50%;
         background-color: {st.session_state.vinyl_color}; 
         display: flex; 
         justify-content: center; 
         align-items: center; 
         z-index: 2;
-        box-shadow: inset 0 0 12px rgba(0,0,0,0.5), 0 0 2px rgba(0,0,0,0.8);
+        box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 0 2px rgba(0,0,0,0.8);
         transition: background-color 0.6s ease;
     }}
     
@@ -205,7 +230,7 @@ html_vinilo = f"""
     }}
     
     .yt-player {{
-        margin-top: 16px;
+        margin-top: 14px;
         border-radius: 12px;
         box-shadow: 0 0 12px {st.session_state.vinyl_color};
     }}
@@ -222,14 +247,14 @@ html_vinilo = f"""
 </html>
 """
 
-# Renderizar el vinilo
-altura_componente = 360 if st.session_state.video_id else 220
+# Renderizar vinilo
+altura_componente = 340 if st.session_state.video_id else 200
 components.html(html_vinilo, height=altura_componente)
 
-# Buscador estilo burbuja abajo del vinilo (sin emojis)
-query = st.text_input("", placeholder="Buscar cancion, artista o genero...")
+# Buscador minimalista
+query = st.text_input("", placeholder="Buscar canción, artista o género...")
 
-# Lógica de búsqueda y resultados
+# Resultados
 if query:
     st.write("### Sugerencias")
     try:
