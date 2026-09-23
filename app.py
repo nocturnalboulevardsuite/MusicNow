@@ -63,7 +63,7 @@ st.markdown("""
         100% { background-position: 0% 0%; }
     }
 
-    /* Ocultar instrucciones de Streamlit */
+    /* Ocultar instrucciones predeterminadas de Streamlit */
     div[data-testid="InputInstructions"], 
     div[data-testid="stInputInstructions"],
     [data-testid="stInputInstructions"],
@@ -192,37 +192,23 @@ def obtener_color_aleatorio():
     ]
     return random.choice(colores)
 
-# Componente HTML del Vinilo Animado y Reproductor
-reproductor_html = ""
-clase_animacion = ""
-
-if st.session_state.video_id:
-    clase_animacion = "spin"
-    reproductor_html = f"""
-    <div style="width: 100%; max-width: 480px; margin-top: 16px;">
-        <iframe class="yt-player" width="100%" height="180" 
-            src="https://www.youtube.com/embed/{st.session_state.video_id}?autoplay=1&controls=1&enablejsapi=1" 
-            title="Reproductor de audio"
-            frameborder="0" 
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-            allowfullscreen>
-        </iframe>
-        <p style='color: #dddddd; font-family: "Inter", sans-serif; text-align: center; margin-top: 10px; font-size: 0.95rem; font-weight: 600;'>
-            ▶ Reproduciendo: {st.session_state.song_title} — {st.session_state.artist_name}
-        </p>
-    </div>
-    """
-
-# Estilo para la carátula en el centro del vinilo
+# Configuración del vinilo y reproductor interactivo
+label_style = ""
 if st.session_state.thumbnail_url:
     label_style = f"background-image: url('{st.session_state.thumbnail_url}'); background-size: cover; background-position: center; border: 2px solid {st.session_state.vinyl_color};"
 else:
     label_style = f"background-color: {st.session_state.vinyl_color};"
 
-html_vinilo = f"""
+v_id = st.session_state.video_id or ""
+s_title = st.session_state.song_title or ""
+s_artist = st.session_state.artist_name or ""
+v_color = st.session_state.vinyl_color
+
+html_reproductor_completo = f"""
 <!DOCTYPE html>
 <html>
 <head>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 <style>
     body {{
         background-color: transparent; 
@@ -232,20 +218,22 @@ html_vinilo = f"""
         justify-content: center; 
         margin: 0; 
         padding: 0;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        color: #ffffff;
     }}
     .vinyl {{
-        width: 185px; height: 185px; border-radius: 50%; position: relative; 
+        width: 175px; height: 175px; border-radius: 50%; position: relative; 
         display: flex; justify-content: center; align-items: center;
         background: radial-gradient(circle at center, transparent 38%, rgba(0,0,0,0.85) 39%, transparent 40%),
                     repeating-radial-gradient(circle at center, #0d0d0d 0px, #0d0d0d 2px, #222 3px, #141414 4px),
                     conic-gradient(from 45deg, #050505, #3d3d3d 22deg, #050505 45deg, #050505 225deg, #3d3d3d 247deg, #050505 270deg);
-        box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 18px {st.session_state.vinyl_color};
+        box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 18px {v_color};
         border: 1px solid #1a1a1a;
     }}
     .center-label {{
-        width: 72px; height: 72px; border-radius: 50%;
+        width: 68px; height: 68px; border-radius: 50%;
         display: flex; justify-content: center; align-items: center; z-index: 2;
-        box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 0 8px {st.session_state.vinyl_color};
+        box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 0 8px {v_color};
         transition: all 0.5s ease;
         {label_style}
     }}
@@ -253,23 +241,258 @@ html_vinilo = f"""
         width: 10px; height: 10px; background: #ffffff; border-radius: 50%; box-shadow: inset 0 0 2px rgba(0,0,0,0.8);
     }}
     .spin {{ animation: spin 2.2s linear infinite; }}
+    .paused {{ animation-play-state: paused !important; }}
     @keyframes spin {{ 100% {{ transform: rotate(360deg); }} }}
-    .yt-player {{ 
-        border-radius: 12px; 
-        box-shadow: 0 0 15px {st.session_state.vinyl_color}; 
+
+    /* TARJETA DEL REPRODUCTOR */
+    .player-card {{
+        width: 100%;
+        max-width: 440px;
+        background-color: #16161a;
         border: 1px solid #2a2a30;
+        border-radius: 16px;
+        padding: 16px 20px;
+        margin-top: 18px;
+        box-shadow: 0 0 20px rgba(0,0,0,0.6), 0 0 10px {v_color}40;
+        box-sizing: border-box;
+    }}
+    .song-details {{
+        text-align: center;
+        margin-bottom: 12px;
+        font-size: 0.92rem;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: #f0f0f0;
+    }}
+    
+    /* BARRA DE PROGRESO Y TIEMPO */
+    .progress-container {{
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+    }}
+    .time-stamp {{
+        font-size: 0.78rem;
+        color: #a0a0a0;
+        min-width: 36px;
+        font-weight: 500;
+    }}
+    .progress-bar {{
+        flex-grow: 1;
+        -webkit-appearance: none;
+        appearance: none;
+        height: 5px;
+        border-radius: 5px;
+        background: #33333d;
+        outline: none;
+        cursor: pointer;
+    }}
+    .progress-bar::-webkit-slider-thumb {{
+        -webkit-appearance: none;
+        appearance: none;
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: {v_color};
+        cursor: pointer;
+        box-shadow: 0 0 8px {v_color};
+    }}
+
+    /* CONTROLES (PLAY/PAUSA Y VOLUMEN) */
+    .controls-row {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }}
+    .btn-play {{
+        background-color: {v_color};
+        color: #ffffff;
+        border: none;
+        border-radius: 50px;
+        padding: 8px 22px;
+        font-size: 0.9rem;
+        font-weight: 700;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        box-shadow: 0 0 10px {v_color}80;
+    }}
+    .btn-play:hover {{
+        transform: scale(1.04);
+    }}
+    .volume-box {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #a0a0a0;
+        font-size: 0.85rem;
+    }}
+    .volume-slider {{
+        -webkit-appearance: none;
+        appearance: none;
+        width: 85px;
+        height: 4px;
+        border-radius: 4px;
+        background: #33333d;
+        outline: none;
+        cursor: pointer;
+    }}
+    .volume-slider::-webkit-slider-thumb {{
+        -webkit-appearance: none;
+        appearance: none;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #ffffff;
+        cursor: pointer;
+    }}
+
+    #yt-hidden-player {{
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0.01;
+        pointer-events: none;
+    }}
+
+    .error-notice {{
+        display: none;
+        color: #ff4444;
+        font-size: 0.82rem;
+        text-align: center;
+        margin-top: 8px;
     }}
 </style>
 </head>
 <body>
-    <div class="vinyl {clase_animacion}"><div class="center-label"><div class="center-hole"></div></div></div>
-    {reproductor_html}
+
+    <!-- Vinilo Animado -->
+    <div id="vinyl-disk" class="vinyl {'spin' if v_id else ''}">
+        <div class="center-label"><div class="center-hole"></div></div>
+    </div>
+
+    <!-- Contenedor iframe invisible para la API de YT -->
+    <div id="yt-hidden-player">
+        <div id="player"></div>
+    </div>
+
+    <!-- Tarjeta Interactiva del Reproductor -->
+    {"<div class='player-card'>" if v_id else "<div style='margin-top:15px; color:#777; font-size:0.9rem;'>Selecciona una canción para reproducir</div>"}
+    {"<div class='song-details'>▶ " + s_title + " — " + s_artist + "</div>" if v_id else ""}
+    {"<div class='progress-container'><span id='curr-time' class='time-stamp'>0:00</span><input type='range' id='progress' class='progress-bar' value='0' min='0' max='100' oninput='seekToTime(this.value)'><span id='total-dur' class='time-stamp'>0:00</span></div>" if v_id else ""}
+    {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-pause'></i> Pausa</button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
+    {"<div id='err-msg' class='error-notice'>⚠️ Esta pista no permite reproducción externa. Por favor elige otra canción de las sugerencias.</div>" if v_id else ""}
+    {"</div>" if v_id else ""}
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script>
+        var player;
+        var isPlaying = false;
+        var videoId = "{v_id}";
+
+        function onYouTubeIframeAPIReady() {{
+            if (!videoId) return;
+            player = new YT.Player('player', {{
+                height: '1',
+                width: '1',
+                videoId: videoId,
+                playerVars: {{
+                    'autoplay': 1,
+                    'controls': 0,
+                    'modestbranding': 1,
+                    'rel': 0
+                }},
+                events: {{
+                    'onReady': onPlayerReady,
+                    'onStateChange': onPlayerStateChange,
+                    'onError': onPlayerError
+                }}
+            }});
+        }}
+
+        function onPlayerReady(event) {{
+            event.target.playVideo();
+            startUpdateLoop();
+        }}
+
+        function onPlayerStateChange(event) {{
+            var vinyl = document.getElementById('vinyl-disk');
+            var btnIcon = document.getElementById('play-icon');
+            var btnText = document.getElementById('play-btn');
+
+            if (event.data == YT.PlayerState.PLAYING) {{
+                isPlaying = true;
+                if (vinyl) {{ vinyl.classList.add('spin'); vinyl.classList.remove('paused'); }}
+                if (btnIcon) btnIcon.className = "fas fa-pause";
+                if (btnText) btnText.innerHTML = '<i class="fas fa-pause"></i> Pausa';
+            }} else if (event.data == YT.PlayerState.PAUSED || event.data == YT.PlayerState.ENDED) {{
+                isPlaying = false;
+                if (vinyl) {{ vinyl.classList.add('paused'); }}
+                if (btnIcon) btnIcon.className = "fas fa-play";
+                if (btnText) btnText.innerHTML = '<i class="fas fa-play"></i> Play';
+            }}
+        }}
+
+        function togglePlay() {{
+            if (!player) return;
+            if (isPlaying) {{
+                player.pauseVideo();
+            }} else {{
+                player.playVideo();
+            }}
+        }}
+
+        function changeVolume(val) {{
+            if (player && player.setVolume) {{
+                player.setVolume(val);
+            }}
+        }}
+
+        function seekToTime(val) {{
+            if (player && player.getDuration) {{
+                var dur = player.getDuration();
+                var target = (val / 100) * dur;
+                player.seekTo(target, true);
+            }}
+        }}
+
+        function formatTime(sec) {{
+            sec = Math.floor(sec || 0);
+            var m = Math.floor(sec / 60);
+            var s = sec % 60;
+            return m + ":" + (s < 10 ? "0" : "") + s;
+        }}
+
+        function startUpdateLoop() {{
+            setInterval(function() {{
+                if (player && player.getCurrentTime && player.getDuration) {{
+                    var cur = player.getCurrentTime();
+                    var dur = player.getDuration();
+                    if (dur > 0) {{
+                        document.getElementById('curr-time').innerText = formatTime(cur);
+                        document.getElementById('total-dur').innerText = formatTime(dur);
+                        document.getElementById('progress').value = (cur / dur) * 100;
+                    }}
+                }}
+            }}, 400);
+        }}
+
+        function onPlayerError(e) {{
+            var err = document.getElementById('err-msg');
+            if (err) err.style.display = 'block';
+        }}
+    </script>
 </body>
 </html>
 """
 
-altura_componente = 430 if st.session_state.video_id else 210
-components.html(html_vinilo, height=altura_componente)
+altura_componente = 360 if st.session_state.video_id else 210
+components.html(html_reproductor_completo, height=altura_componente)
 
 # ---------------------------------------------------------
 # FORMULARIO DE BÚSQUEDA EN TIEMPO REAL
