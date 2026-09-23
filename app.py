@@ -13,7 +13,7 @@ ytmusic = get_ytmusic()
 # Configuración de la página
 st.set_page_config(page_title="MusicNow", layout="centered")
 
-# CSS Global con eliminación absoluta de "Press Enter to apply"
+# CSS Global estilizado y con eliminación total de "Press Enter to apply"
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap');
@@ -60,9 +60,7 @@ st.markdown("""
         100% { background-position: 0% 0%; }
     }
 
-    /* ========================================================= */
-    /* ELIMINACIÓN TOTAL Y AGRESIVA DE "PRESS ENTER TO APPLY"    */
-    /* ========================================================= */
+    /* ELIMINACIÓN DE "PRESS ENTER TO APPLY" */
     div[data-testid="InputInstructions"], 
     div[data-testid="stInputInstructions"],
     [data-testid="stInputInstructions"],
@@ -85,44 +83,52 @@ st.markdown("""
         box-shadow: none !important;
     }
 
-    /* DISEÑO DE LA BARRA DE BÚSQUEDA (BORDES ROJOS Y LIMPIOS) */
+    /* DISEÑO DE LA BARRA DE BÚSQUEDA */
+    div[data-testid="stTextInput"] {
+        margin-bottom: 0px !important;
+    }
+
     div[data-testid="stTextInput"] > div > div {
         background-color: #16161a !important;
-        border-radius: 10px !important;
+        border-radius: 12px !important;
         border: 2px solid #ff2222 !important;
-        box-shadow: 0 0 10px rgba(255, 34, 34, 0.15) !important;
+        box-shadow: 0 0 12px rgba(255, 34, 34, 0.2) !important;
         transition: all 0.3s ease !important;
-        height: 48px !important;
+        height: 46px !important;
     }
 
     div[data-testid="stTextInput"] > div > div:focus-within {
         border-color: #ff5555 !important;
-        box-shadow: 0 0 15px rgba(255, 34, 34, 0.35) !important;
+        box-shadow: 0 0 18px rgba(255, 34, 34, 0.4) !important;
     }
 
     div[data-testid="stTextInput"] input {
         background-color: transparent !important;
         color: #ffffff !important;
         font-family: 'Inter', sans-serif !important;
-        font-size: 1rem !important;
-        padding: 12px 18px !important;
-        height: 44px !important;
+        font-size: 0.95rem !important;
+        padding: 10px 16px !important;
+        height: 42px !important;
     }
 
-    /* BOTÓN A LA IZQUIERDA */
-    div[data-testid="column"]:nth-child(1) button {
-        height: 48px !important;
-        border-radius: 10px !important;
-        background-color: #16161a !important;
-        border: 1px solid #2a2a30 !important;
+    /* ESTILO DEL BOTÓN BUSCAR */
+    div[data-testid="column"]:nth-child(2) button {
+        height: 46px !important;
+        border-radius: 12px !important;
+        background-color: #1a1618 !important;
+        border: 1px solid #ff2222 !important;
         color: #ffffff !important;
         font-weight: 600 !important;
-        transition: all 0.2s ease;
+        font-size: 0.95rem !important;
+        transition: all 0.2s ease !important;
+        box-shadow: 0 0 8px rgba(255, 34, 34, 0.15) !important;
     }
 
-    div[data-testid="column"]:nth-child(1) button:hover {
+    div[data-testid="column"]:nth-child(2) button:hover {
         background-color: #ff2222 !important;
         border-color: #ff2222 !important;
+        color: #ffffff !important;
+        box-shadow: 0 0 14px rgba(255, 34, 34, 0.5) !important;
     }
 
     /* BOTONES DE RESULTADOS */
@@ -153,7 +159,7 @@ st.markdown("""
         color: #ffffff !important;
         font-size: 1.1rem !important;
         font-weight: 700 !important;
-        margin-top: 15px !important;
+        margin-top: 20px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -165,7 +171,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Estado global de reproducción
+# Estado global
 if 'video_id' not in st.session_state:
     st.session_state.video_id = None
     st.session_state.song_title = None
@@ -175,13 +181,12 @@ if 'video_id' not in st.session_state:
 if 'current_query' not in st.session_state:
     st.session_state.current_query = ""
 
-# Generador de color por artista
 def obtener_color_artista(artista):
     if not artista: return "#e60000"
     hash_object = hashlib.md5(artista.encode())
     return '#' + hash_object.hexdigest()[:6]
 
-# Reproductor embebido
+# Reproductor
 reproductor_html = ""
 clase_animacion = ""
 
@@ -197,7 +202,7 @@ if st.session_state.video_id:
     </p>
     """
 
-# Componente HTML del Vinilo
+# Vinilo HTML
 html_vinilo = f"""
 <!DOCTYPE html>
 <html>
@@ -248,18 +253,17 @@ altura_componente = 340 if st.session_state.video_id else 200
 components.html(html_vinilo, height=altura_componente)
 
 # ---------------------------------------------------------
-# BOTÓN Y BARRA EN COLUMNAS
+# BLOQUE DE BÚSQUEDA CENTRADO Y SIMÉTRICO
 # ---------------------------------------------------------
-col_btn, col_input = st.columns([1, 4])
+pad_left, col_btn, col_input, pad_right = st.columns([0.35, 1.1, 3.8, 0.35], vertical_alignment="bottom")
 
 with col_btn:
-    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True) 
     btn_buscar = st.button("Buscar", use_container_width=True)
 
 with col_input:
-    query_input = st.text_input("Búsqueda", placeholder="Buscar canción, artista o género...", label_visibility="hidden")
+    query_input = st.text_input("Búsqueda", placeholder="Buscar canción, artista o género...", label_visibility="collapsed")
 
-# Actualizar término de búsqueda
+# Acción de Búsqueda
 if (btn_buscar or query_input) and query_input:
     st.session_state.current_query = query_input
 
