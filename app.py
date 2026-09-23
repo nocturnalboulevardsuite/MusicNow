@@ -13,10 +13,10 @@ ytmusic = get_ytmusic()
 # Configuración de la página
 st.set_page_config(page_title="MusicNow", layout="centered")
 
-# CSS Global con diseño elevado, tipografía Inter y efecto RGBIC
+# CSS Global con tipografía Inter y animación RGBIC de inicio a fin
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap');
 
     .stApp { 
         background-color: #0e0e10; 
@@ -38,35 +38,36 @@ st.markdown("""
         text-align: center;
         font-size: 3.8rem;
         font-weight: 900;
-        margin-bottom: 2px;
+        margin-bottom: 4px;
         letter-spacing: -1.5px;
     }
     
-    /* Subtítulo en Rojo */
-    .minimal-sub {
+    /* Subtítulo con efecto RGBIC en TODAS las letras (Ida y Vuelta) */
+    .minimal-sub-rgbic {
         font-family: 'Inter', sans-serif;
-        color: #ff2222;
         text-align: center;
         font-size: 1.05rem;
-        font-weight: 600;
+        font-weight: 700;
         margin-top: 0;
-        margin-bottom: 15px;
-    }
-
-    /* Texto con efecto RGBIC animado */
-    .rgbic-text {
-        background: linear-gradient(90deg, #ff0055, #ff5000, #00f0ff, #7000ff, #ff0055);
-        background-size: 300% 300%;
+        margin-bottom: 18px;
+        letter-spacing: -0.2px;
+        
+        /* Gradiente RGBIC extendido de espectro completo */
+        background: linear-gradient(90deg, #ff2222, #ff6b00, #00f0ff, #a855f7, #ec4899, #ff2222);
+        background-size: 300% 100%;
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        animation: rgbicAnimation 3s ease infinite;
-        font-weight: 800;
+        animation: rgbicSweep 3.5s ease-in-out infinite alternate;
     }
 
-    @keyframes rgbicAnimation {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
+    /* Transición suave de izquierda a derecha y retorno */
+    @keyframes rgbicSweep {
+        0% {
+            background-position: 0% 50%;
+        }
+        100% {
+            background-position: 100% 50%;
+        }
     }
 
     /* Buscador minimalista redondeado */
@@ -133,7 +134,7 @@ st.markdown("""
 # Encabezado principal
 st.markdown("<h1 class='minimal-title'>MusicNow</h1>", unsafe_allow_html=True)
 st.markdown(
-    "<p class='minimal-sub'>Busca la <span class='rgbic-text'>canción o música</span> que quieras y reprodúcela ahora mismo</p>", 
+    "<p class='minimal-sub-rgbic'>Busca la canción o música que quieras y reprodúcela ahora mismo</p>", 
     unsafe_allow_html=True
 )
 
