@@ -1,7 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
 from ytmusicapi import YTMusic
-import hashlib
+import random
 
 # Inicializar buscador de YouTube Music
 @st.cache_resource
@@ -139,7 +139,7 @@ st.markdown("""
         text-align: left; 
         transition: all 0.2s ease;
         padding: 12px 16px;
-        margin-bottom: 6px;
+        margin-bottom: 0px;
     }
     
     div.stButton > button:hover { 
@@ -147,6 +147,12 @@ st.markdown("""
         border-color: #ff2222 !important; 
         color: #ffffff !important; 
         transform: translateY(-1px);
+    }
+
+    /* IMÁGENES DE MINIATURA */
+    div[data-testid="stImage"] img {
+        border-radius: 8px !important;
+        object-fit: cover !important;
     }
 
     h3 {
@@ -172,35 +178,46 @@ if 'video_id' not in st.session_state:
     st.session_state.video_id = None
     st.session_state.song_title = None
     st.session_state.artist_name = None
-    st.session_state.vinyl_color = "#e60000"
+    st.session_state.vinyl_color = "#ff2222"
+    st.session_state.thumbnail_url = ""
 
 if 'current_query' not in st.session_state:
     st.session_state.current_query = ""
 
-def obtener_color_artista(artista):
-    if not artista: return "#e60000"
-    hash_object = hashlib.md5(artista.encode())
-    return '#' + hash_object.hexdigest()[:6]
+def obtener_color_aleatorio():
+    colores = [
+        "#ff2222", "#00f0ff", "#a855f7", "#ec4899", 
+        "#ff9500", "#00ff88", "#3b82f6", "#ff206e", 
+        "#10b981", "#e11d48", "#8b5cf6", "#f59e0b"
+    ]
+    return random.choice(colores)
 
-# Componente HTML del Vinilo Animado y Reproductor Embed
+# Componente HTML del Vinilo Animado y Reproductor
 reproductor_html = ""
 clase_animacion = ""
 
 if st.session_state.video_id:
     clase_animacion = "spin"
-    # Se utiliza www.youtube-nocookie.com para prevenir bloqueos de CORS/Iframe
     reproductor_html = f"""
-    <iframe class="yt-player" width="300" height="80" 
-        src="https://www.youtube-nocookie.com/embed/{st.session_state.video_id}?autoplay=1&rel=0" 
-        title="Reproductor de audio"
-        frameborder="0" 
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-        allowfullscreen>
-    </iframe>
-    <p style='color: #dddddd; font-family: "Inter", sans-serif; text-align: center; margin-top: 12px; font-size: 0.95rem; font-weight: 600;'>
-        ▶ Reproduciendo: {st.session_state.song_title} — {st.session_state.artist_name}
-    </p>
+    <div style="width: 100%; max-width: 480px; margin-top: 16px;">
+        <iframe class="yt-player" width="100%" height="180" 
+            src="https://www.youtube.com/embed/{st.session_state.video_id}?autoplay=1&controls=1&enablejsapi=1" 
+            title="Reproductor de audio"
+            frameborder="0" 
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+            allowfullscreen>
+        </iframe>
+        <p style='color: #dddddd; font-family: "Inter", sans-serif; text-align: center; margin-top: 10px; font-size: 0.95rem; font-weight: 600;'>
+            ▶ Reproduciendo: {st.session_state.song_title} — {st.session_state.artist_name}
+        </p>
+    </div>
     """
+
+# Estilo para la carátula en el centro del vinilo
+if st.session_state.thumbnail_url:
+    label_style = f"background-image: url('{st.session_state.thumbnail_url}'); background-size: cover; background-position: center; border: 2px solid {st.session_state.vinyl_color};"
+else:
+    label_style = f"background-color: {st.session_state.vinyl_color};"
 
 html_vinilo = f"""
 <!DOCTYPE html>
@@ -222,22 +239,26 @@ html_vinilo = f"""
         background: radial-gradient(circle at center, transparent 38%, rgba(0,0,0,0.85) 39%, transparent 40%),
                     repeating-radial-gradient(circle at center, #0d0d0d 0px, #0d0d0d 2px, #222 3px, #141414 4px),
                     conic-gradient(from 45deg, #050505, #3d3d3d 22deg, #050505 45deg, #050505 225deg, #3d3d3d 247deg, #050505 270deg);
-        box-shadow: 0 8px 22px rgba(0,0,0,0.9), inset 0 0 1px rgba(255,255,255,0.2);
+        box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 18px {st.session_state.vinyl_color};
         border: 1px solid #1a1a1a;
     }}
     .center-label {{
-        width: 66px; height: 66px; border-radius: 50%;
-        background-color: {st.session_state.vinyl_color}; 
+        width: 72px; height: 72px; border-radius: 50%;
         display: flex; justify-content: center; align-items: center; z-index: 2;
-        box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 0 2px rgba(0,0,0,0.8);
-        transition: background-color 0.6s ease;
+        box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 0 8px {st.session_state.vinyl_color};
+        transition: all 0.5s ease;
+        {label_style}
     }}
     .center-hole {{ 
-        width: 8px; height: 8px; background: #ffffff; border-radius: 50%; box-shadow: inset 0 0 2px rgba(0,0,0,0.8);
+        width: 10px; height: 10px; background: #ffffff; border-radius: 50%; box-shadow: inset 0 0 2px rgba(0,0,0,0.8);
     }}
     .spin {{ animation: spin 2.2s linear infinite; }}
     @keyframes spin {{ 100% {{ transform: rotate(360deg); }} }}
-    .yt-player {{ margin-top: 14px; border-radius: 12px; box-shadow: 0 0 12px {st.session_state.vinyl_color}; }}
+    .yt-player {{ 
+        border-radius: 12px; 
+        box-shadow: 0 0 15px {st.session_state.vinyl_color}; 
+        border: 1px solid #2a2a30;
+    }}
 </style>
 </head>
 <body>
@@ -247,7 +268,7 @@ html_vinilo = f"""
 </html>
 """
 
-altura_componente = 340 if st.session_state.video_id else 200
+altura_componente = 430 if st.session_state.video_id else 210
 components.html(html_vinilo, height=altura_componente)
 
 # ---------------------------------------------------------
@@ -264,7 +285,7 @@ if btn_buscar and query_input.strip():
     st.session_state.current_query = query_input.strip()
 
 # ---------------------------------------------------------
-# BÚSQUEDA GLOBAL EN TIEMPO REAL (VIDEOS + CANCIONES)
+# BÚSQUEDA GLOBAL Y RESULTADOS CON MINIATURAS
 # ---------------------------------------------------------
 if st.session_state.current_query:
     st.write("### Sugerencias")
@@ -273,10 +294,7 @@ if st.session_state.current_query:
         st.error("No se pudo conectar a YouTube Music.")
     else:
         try:
-            # Se buscan videos y canciones combinadas para evitar bloqueos de copyright en embed
             resultados = ytmusic.search(st.session_state.current_query, filter="videos", limit=8)
-            
-            # Si no hay suficientes videos, hace una búsqueda general amplia
             if not resultados:
                 resultados = ytmusic.search(st.session_state.current_query, limit=8)
             
@@ -296,14 +314,24 @@ if st.session_state.current_query:
                     
                     duracion = item.get('duration', '')
                     
+                    # Obtener miniatura devuelta por la API
+                    thumbnails = item.get('thumbnails', [])
+                    thumb_url = thumbnails[-1]['url'] if thumbnails else ""
+                    
                     texto_opcion = f"🎵  {titulo} — {artistas}" + (f" ({duracion})" if duracion else "")
                     
-                    if st.button(texto_opcion, key=f"song_{v_id}_{idx}"):
-                        st.session_state.video_id = v_id
-                        st.session_state.song_title = titulo
-                        st.session_state.artist_name = artistas
-                        st.session_state.vinyl_color = obtener_color_artista(artistas)
-                        st.rerun()
-                        
+                    col_img, col_btn = st.columns([0.14, 0.86], vertical_alignment="center")
+                    with col_img:
+                        if thumb_url:
+                            st.image(thumb_url, use_container_width=True)
+                    with col_btn:
+                        if st.button(texto_opcion, key=f"song_{v_id}_{idx}"):
+                            st.session_state.video_id = v_id
+                            st.session_state.song_title = titulo
+                            st.session_state.artist_name = artistas
+                            st.session_state.vinyl_color = obtener_color_aleatorio()
+                            st.session_state.thumbnail_url = thumb_url
+                            st.rerun()
+                            
         except Exception as e:
             st.error(f"Error al realizar la búsqueda: {str(e)}")
