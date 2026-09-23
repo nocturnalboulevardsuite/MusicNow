@@ -267,6 +267,22 @@ html_reproductor_completo = f"""
         color: #f0f0f0;
     }}
     
+    /* REPRODUCTOR VISIBLE DE YOUTUBE */
+    .video-box {{
+        width: 100%;
+        height: 160px;
+        border-radius: 12px;
+        overflow: hidden;
+        margin-bottom: 14px;
+        border: 1px solid #2a2a30;
+        box-shadow: 0 0 10px {v_color}30;
+    }}
+    .video-box iframe {{
+        width: 100%;
+        height: 100%;
+        border: none;
+    }}
+
     /* BARRA DE PROGRESO Y TIEMPO */
     .progress-container {{
         display: flex;
@@ -352,22 +368,6 @@ html_reproductor_completo = f"""
         box-shadow: 0 0 6px {v_color};
         cursor: pointer;
     }}
-
-    .yt-hidden-container {{
-        width: 0px;
-        height: 0px;
-        overflow: hidden;
-        position: absolute;
-        visibility: hidden;
-    }}
-
-    .error-notice {{
-        display: none;
-        color: #ff4444;
-        font-size: 0.82rem;
-        text-align: center;
-        margin-top: 8px;
-    }}
 </style>
 </head>
 <body>
@@ -377,17 +377,15 @@ html_reproductor_completo = f"""
         <div class="center-label"><div class="center-hole"></div></div>
     </div>
 
-    <!-- Contenedor iframe oculto con dimensión funcional para evitar bloqueos del navegador -->
-    <div class="yt-hidden-container">
-        {"<iframe id='yt-player-iframe' src='https://www.youtube-nocookie.com/embed/" + v_id + "?enablejsapi=1&autoplay=1&controls=0&rel=0&playsinline=1' width='300' height='200' allow='autoplay; encrypted-media'></iframe>" if v_id else ""}
-    </div>
-
     <!-- Tarjeta Interactiva del Reproductor -->
     {"<div class='player-card'>" if v_id else "<div style='margin-top:15px; color:#777; font-size:0.9rem;'>Selecciona una canción para reproducir</div>"}
     {"<div class='song-details'>▶ " + s_title + " — " + s_artist + "</div>" if v_id else ""}
+    
+    <!-- Video de YouTube visible e interactivo -->
+    {f'<div class="video-box"><iframe id="yt-player-iframe" src="https://www.youtube-nocookie.com/embed/{v_id}?enablejsapi=1&autoplay=1&rel=0&playsinline=1" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>' if v_id else ''}
+    
     {"<div class='progress-container'><span id='curr-time' class='time-stamp'>0:00</span><input type='range' id='progress' class='progress-bar' value='0' min='0' max='100' oninput='seekToTime(this.value)'><span id='total-dur' class='time-stamp'>0:00</span></div>" if v_id else ""}
     {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-pause'></i> Pausa</button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
-    {"<div id='err-msg' class='error-notice'>⚠️ Esta pista no permite reproducción incrustada. Elige otra canción.</div>" if v_id else ""}
     {"</div>" if v_id else ""}
 
     <script src="https://www.youtube.com/iframe_api"></script>
@@ -402,8 +400,7 @@ html_reproductor_completo = f"""
             player = new YT.Player('yt-player-iframe', {{
                 events: {{
                     'onReady': onPlayerReady,
-                    'onStateChange': onPlayerStateChange,
-                    'onError': onPlayerError
+                    'onStateChange': onPlayerStateChange
                 }}
             }});
         }}
@@ -490,17 +487,12 @@ html_reproductor_completo = f"""
                 }}
             }}, 300);
         }}
-
-        function onPlayerError(e) {{
-            var err = document.getElementById('err-msg');
-            if (err) err.style.display = 'block';
-        }}
     </script>
 </body>
 </html>
 """
 
-altura_componente = 360 if st.session_state.video_id else 210
+altura_componente = 520 if st.session_state.video_id else 210
 components.html(html_reproductor_completo, height=altura_componente)
 
 # ---------------------------------------------------------
