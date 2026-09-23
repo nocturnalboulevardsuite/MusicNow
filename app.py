@@ -13,7 +13,7 @@ ytmusic = get_ytmusic()
 # Configuración de la página
 st.set_page_config(page_title="MusicNow", layout="centered")
 
-# CSS Global con tipografía Inter, Ola RGBIC y Diseño Side-by-Side
+# CSS Global con eliminación absoluta de "Press Enter to apply"
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap');
@@ -24,14 +24,12 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
-    /* Elevar todo el contenido hacia arriba */
     .block-container {
         padding-top: 1.5rem !important;
         padding-bottom: 1rem !important;
         max-width: 680px !important;
     }
 
-    /* Título Minimalista */
     .minimal-title {
         font-family: 'Inter', sans-serif;
         color: #ff2222;
@@ -42,7 +40,6 @@ st.markdown("""
         letter-spacing: -1.5px;
     }
     
-    /* Subtítulo: Letra roja base con una ola de luz RGBIC */
     .minimal-sub-wave {
         font-family: 'Inter', sans-serif;
         text-align: center;
@@ -63,23 +60,36 @@ st.markdown("""
         100% { background-position: 0% 0%; }
     }
 
-    /* OCULTAR COMPLETAMENTE 'Press Enter to apply' Y TEXTOS DE INSTRUCCIÓN */
-    div[data-testid="stInputInstructions"], 
-    small[data-testid="stInputInstructions"],
-    .stInputInstructions,
-    [data-testid="stInputInstructions"] * {
+    /* ========================================================= */
+    /* ELIMINACIÓN TOTAL Y AGRESIVA DE "PRESS ENTER TO APPLY"    */
+    /* ========================================================= */
+    div[data-testid="InputInstructions"], 
+    div[data-testid="stInputInstructions"],
+    [data-testid="stInputInstructions"],
+    [data-testid="InputInstructions"],
+    .stTextInputInstructions,
+    div[data-testid="stTextInput"] small,
+    div[data-testid="stTextInput"] [data-testid="InputInstructions"],
+    div[data-baseweb="popover"],
+    div[data-baseweb="tooltip"] {
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
         height: 0 !important;
         width: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        position: absolute !important;
+        pointer-events: none !important;
+        border: none !important;
+        box-shadow: none !important;
     }
 
-    /* DISEÑO DE LA BARRA DE BÚSQUEDA (BORDES ROJOS) */
+    /* DISEÑO DE LA BARRA DE BÚSQUEDA (BORDES ROJOS Y LIMPIOS) */
     div[data-testid="stTextInput"] > div > div {
         background-color: #16161a !important;
         border-radius: 10px !important;
-        border: 2px solid #ff2222 !important; /* BORDE ROJO SOLICITADO */
+        border: 2px solid #ff2222 !important;
         box-shadow: 0 0 10px rgba(255, 34, 34, 0.15) !important;
         transition: all 0.3s ease !important;
         height: 48px !important;
@@ -99,7 +109,7 @@ st.markdown("""
         height: 44px !important;
     }
 
-    /* Estilo específico para el botón de la izquierda (Buscar) */
+    /* BOTÓN A LA IZQUIERDA */
     div[data-testid="column"]:nth-child(1) button {
         height: 48px !important;
         border-radius: 10px !important;
@@ -115,8 +125,7 @@ st.markdown("""
         border-color: #ff2222 !important;
     }
 
-    /* Botones de sugerencias de canciones (Resultados) */
-    div[data-testid="column"]:nth-child(1) ~ div button,
+    /* BOTONES DE RESULTADOS */
     div.stButton > button {
         background-color: #16161a; 
         color: #e0e0e0; 
@@ -239,12 +248,11 @@ altura_componente = 340 if st.session_state.video_id else 200
 components.html(html_vinilo, height=altura_componente)
 
 # ---------------------------------------------------------
-# BOTÓN A LA IZQUIERDA Y BARRA A LA DERECHA CON ST.COLUMNS
+# BOTÓN Y BARRA EN COLUMNAS
 # ---------------------------------------------------------
-col_btn, col_input = st.columns([1, 4]) # Proporción: 1 parte botón, 4 partes barra
+col_btn, col_input = st.columns([1, 4])
 
 with col_btn:
-    # Agregamos un ligero margen invisible para alinear la altura del botón con el input
     st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True) 
     btn_buscar = st.button("Buscar", use_container_width=True)
 
