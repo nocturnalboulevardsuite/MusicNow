@@ -214,7 +214,7 @@ st.markdown("""
 # Encabezado principal
 st.markdown("<h1 class='minimal-title'>MusicNow</h1>", unsafe_allow_html=True)
 st.markdown(
-    "<p class='minimal-sub-wave'>🎉 ¡Modo Fiesta! Busca tu tema y añádelo a la lista</p>", 
+    "<p class='minimal-sub-wave'>Busca una canción y añádelo a la lista</p>", 
     unsafe_allow_html=True
 )
 
@@ -634,7 +634,7 @@ with col_main:
                                     tiempo_restante = int(COOLDOWN_SECONDS - tiempo_transcurrido)
                                     minutos = tiempo_restante // 60
                                     segundos = tiempo_restante % 60
-                                    st.warning(f"⏳ ¡Espera un poco! Puedes pedir otra canción en {minutos}m {segundos}s.")
+                                    st.warning(f"¡Espera un poco! Puedes pedir otra canción en {minutos}m {segundos}s.")
                                 else:
                                     nueva_cancion = {
                                         'video_id': v_id_item,
@@ -655,7 +655,7 @@ with col_main:
 # COLUMNA DERECHA: LISTA DE ESPERA
 # ---------------------------------------------------------
 with col_queue:
-    st.markdown("### 📜 Lista de espera")
+    st.markdown("### Lista de espera")
     
     if not st.session_state.playlist:
         st.markdown(
