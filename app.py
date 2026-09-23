@@ -16,7 +16,7 @@ ytmusic = get_ytmusic()
 # Configuración de la página
 st.set_page_config(page_title="MusicNow", layout="centered")
 
-# CSS Global estilizado
+# CSS Global
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap');
@@ -63,27 +63,14 @@ st.markdown("""
         100% { background-position: 0% 0%; }
     }
 
-    /* ELIMINACIÓN DE INSTRUCCIONES "PRESS ENTER TO APPLY" */
+    /* Ocultar instrucciones de Streamlit */
     div[data-testid="InputInstructions"], 
     div[data-testid="stInputInstructions"],
     [data-testid="stInputInstructions"],
     [data-testid="InputInstructions"],
     .stTextInputInstructions,
-    div[data-testid="stTextInput"] small,
-    div[data-testid="stTextInput"] [data-testid="InputInstructions"],
-    div[data-baseweb="popover"],
-    div[data-baseweb="tooltip"] {
+    div[data-testid="stTextInput"] small {
         display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        height: 0 !important;
-        width: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        position: absolute !important;
-        pointer-events: none !important;
-        border: none !important;
-        box-shadow: none !important;
     }
 
     /* BARRA DE BÚSQUEDA Y BOTÓN UNIFICADOS */
@@ -195,23 +182,26 @@ def obtener_color_artista(artista):
     hash_object = hashlib.md5(artista.encode())
     return '#' + hash_object.hexdigest()[:6]
 
-# Componente iframe de Reproducción
+# Componente HTML del Vinilo Animado y Reproductor Embed
 reproductor_html = ""
 clase_animacion = ""
 
 if st.session_state.video_id:
     clase_animacion = "spin"
+    # Se utiliza www.youtube-nocookie.com para prevenir bloqueos de CORS/Iframe
     reproductor_html = f"""
-    <iframe class="yt-player" width="280" height="75" 
-        src="https://www.youtube.com/embed/{st.session_state.video_id}?autoplay=1&enablejsapi=1" 
-        frameborder="0" allow="autoplay; encrypted-media" allowfullscreen>
+    <iframe class="yt-player" width="300" height="80" 
+        src="https://www.youtube-nocookie.com/embed/{st.session_state.video_id}?autoplay=1&rel=0" 
+        title="Reproductor de audio"
+        frameborder="0" 
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+        allowfullscreen>
     </iframe>
     <p style='color: #dddddd; font-family: "Inter", sans-serif; text-align: center; margin-top: 12px; font-size: 0.95rem; font-weight: 600;'>
         ▶ Reproduciendo: {st.session_state.song_title} — {st.session_state.artist_name}
     </p>
     """
 
-# Componente HTML del Vinilo Animado
 html_vinilo = f"""
 <!DOCTYPE html>
 <html>
@@ -261,7 +251,7 @@ altura_componente = 340 if st.session_state.video_id else 200
 components.html(html_vinilo, height=altura_componente)
 
 # ---------------------------------------------------------
-# FORMULARIO DE BÚSQUEDA
+# FORMULARIO DE BÚSQUEDA EN TIEMPO REAL
 # ---------------------------------------------------------
 with st.form(key="search_form", border=False):
     col_btn, col_input = st.columns([0.18, 0.82], vertical_alignment="center")
@@ -270,38 +260,44 @@ with st.form(key="search_form", border=False):
     with col_input:
         query_input = st.text_input("Búsqueda", placeholder="Buscar canción, artista o género...", label_visibility="collapsed")
 
-# Al hacer submit en el formulario se actualiza la búsqueda actual
 if btn_buscar and query_input.strip():
     st.session_state.current_query = query_input.strip()
 
 # ---------------------------------------------------------
-# RENDERIZADO DE SUGERENCIAS Y REPRODUCCIÓN
+# BÚSQUEDA GLOBAL EN TIEMPO REAL (VIDEOS + CANCIONES)
 # ---------------------------------------------------------
 if st.session_state.current_query:
-    st.write(f"### Sugerencias")
+    st.write("### Sugerencias")
     
     if ytmusic is None:
-        st.error("Error al conectar con YouTube Music. Verifica que `ytmusicapi` esté instalado.")
+        st.error("No se pudo conectar a YouTube Music.")
     else:
         try:
-            resultados = ytmusic.search(st.session_state.current_query, filter="songs", limit=8)
+            # Se buscan videos y canciones combinadas para evitar bloqueos de copyright en embed
+            resultados = ytmusic.search(st.session_state.current_query, filter="videos", limit=8)
+            
+            # Si no hay suficientes videos, hace una búsqueda general amplia
+            if not resultados:
+                resultados = ytmusic.search(st.session_state.current_query, limit=8)
             
             if not resultados:
                 st.info("No se encontraron resultados para tu búsqueda.")
             else:
-                for idx, song in enumerate(resultados):
-                    v_id = song.get('videoId')
+                for idx, item in enumerate(resultados):
+                    v_id = item.get('videoId')
                     if not v_id:
                         continue
                     
-                    titulo = song.get('title', 'Canción desconocida')
-                    artistas_list = song.get('artists', [])
-                    artistas = ", ".join([a['name'] for a in artistas_list if 'name' in a]) or "Artista desconocido"
-                    duracion = song.get('duration', '')
+                    titulo = item.get('title', 'Canción desconocida')
+                    artistas_list = item.get('artists', [])
+                    artistas = ", ".join([a['name'] for a in artistas_list if 'name' in a])
+                    if not artistas:
+                        artistas = item.get('author', 'Artista')
+                    
+                    duracion = item.get('duration', '')
                     
                     texto_opcion = f"🎵  {titulo} — {artistas}" + (f" ({duracion})" if duracion else "")
                     
-                    # Al hacer clic en una sugerencia, se actualiza la canción y se vuelve a renderizar
                     if st.button(texto_opcion, key=f"song_{v_id}_{idx}"):
                         st.session_state.video_id = v_id
                         st.session_state.song_title = titulo
@@ -310,4 +306,4 @@ if st.session_state.current_query:
                         st.rerun()
                         
         except Exception as e:
-            st.error(f"Error al obtener sugerencias: {str(e)}")
+            st.error(f"Error al realizar la búsqueda: {str(e)}")
