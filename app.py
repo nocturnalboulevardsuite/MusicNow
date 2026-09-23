@@ -13,8 +13,8 @@ def get_ytmusic():
 
 ytmusic = get_ytmusic()
 
-# Configuración de la página
-st.set_page_config(page_title="MusicNow", layout="centered")
+# Configuración de la página en formato ancho (wide)
+st.set_page_config(page_title="MusicNow", layout="wide")
 
 # CSS Global
 st.markdown("""
@@ -30,26 +30,26 @@ st.markdown("""
     .block-container {
         padding-top: 1.5rem !important;
         padding-bottom: 1rem !important;
-        max-width: 680px !important;
+        max-width: 1200px !important;
     }
 
     .minimal-title {
         font-family: 'Inter', sans-serif;
         color: #ff2222;
         text-align: center;
-        font-size: 3.8rem;
+        font-size: 3.5rem;
         font-weight: 900;
-        margin-bottom: 4px;
+        margin-bottom: 2px;
         letter-spacing: -1.5px;
     }
     
     .minimal-sub-wave {
         font-family: 'Inter', sans-serif;
         text-align: center;
-        font-size: 1.05rem;
+        font-size: 1rem;
         font-weight: 700;
         margin-top: 0;
-        margin-bottom: 22px;
+        margin-bottom: 25px;
         letter-spacing: -0.2px;
         background: linear-gradient(90deg, #ff2222 0%, #ff2222 20%, #ff6b00 32%, #00f0ff 42%, #a855f7 52%, #ec4899 62%, #ff2222 75%, #ff2222 100%);
         background-size: 260% 100%;
@@ -73,7 +73,7 @@ st.markdown("""
         display: none !important;
     }
 
-    /* BARRA DE BÚSQUEDA Y BOTÓN UNIFICADOS */
+    /* BARRA DE BÚSQUEDA Y BOTÓN */
     div[data-testid="stForm"] {
         background-color: #16161a !important;
         border: 2px solid #ff2222 !important;
@@ -126,20 +126,18 @@ st.markdown("""
         box-shadow: 0 0 14px rgba(255, 34, 34, 0.6) !important;
     }
 
-    /* BOTONES DE SUGERENCIAS DE CANCIONES */
+    /* BOTONES GENERALES */
     div.stButton > button {
         background-color: #16161a; 
         color: #e0e0e0; 
         font-family: 'Inter', sans-serif;
-        font-size: 0.92rem;
+        font-size: 0.9rem;
         font-weight: 500;
         border: 1px solid #2a2a30; 
         border-radius: 12px; 
         width: 100%; 
-        text-align: left; 
         transition: all 0.2s ease;
-        padding: 12px 16px;
-        margin-bottom: 0px;
+        padding: 8px 12px;
     }
     
     div.stButton > button:hover { 
@@ -160,7 +158,7 @@ st.markdown("""
         color: #ffffff !important;
         font-size: 1.1rem !important;
         font-weight: 700 !important;
-        margin-top: 22px !important;
+        margin-top: 10px !important;
         margin-bottom: 12px !important;
     }
     </style>
@@ -169,17 +167,16 @@ st.markdown("""
 # Encabezado principal
 st.markdown("<h1 class='minimal-title'>MusicNow</h1>", unsafe_allow_html=True)
 st.markdown(
-    "<p class='minimal-sub-wave'>Busca la canción o música que quieras y reprodúcela ahora mismo</p>", 
+    "<p class='minimal-sub-wave'>Busca la música que quieras y crea tu lista de reproducción al instante</p>", 
     unsafe_allow_html=True
 )
 
-# Estado global
-if 'video_id' not in st.session_state:
-    st.session_state.video_id = None
-    st.session_state.song_title = None
-    st.session_state.artist_name = None
-    st.session_state.vinyl_color = "#ff2222"
-    st.session_state.thumbnail_url = ""
+# Estado global de la cola de reproducción
+if 'playlist' not in st.session_state:
+    st.session_state.playlist = []
+
+if 'current_index' not in st.session_state:
+    st.session_state.current_index = -1
 
 if 'current_query' not in st.session_state:
     st.session_state.current_query = ""
@@ -192,414 +189,445 @@ def obtener_color_aleatorio():
     ]
     return random.choice(colores)
 
-# Configuración del vinilo y reproductor interactivo
-label_style = ""
-if st.session_state.thumbnail_url:
-    label_style = f"background-image: url('{st.session_state.thumbnail_url}'); background-size: cover; background-position: center; border: 2px solid {st.session_state.vinyl_color};"
-else:
-    label_style = f"background-color: {st.session_state.vinyl_color};"
+def reproducir_indice(idx):
+    if 0 <= idx < len(st.session_state.playlist):
+        st.session_state.current_index = idx
 
-v_id = st.session_state.video_id or ""
-s_title = st.session_state.song_title or ""
-s_artist = st.session_state.artist_name or ""
-v_color = st.session_state.vinyl_color
+def siguiente_cancion():
+    if st.session_state.playlist and st.session_state.current_index < len(st.session_state.playlist) - 1:
+        st.session_state.current_index += 1
 
-html_reproductor_completo = f"""
-<!DOCTYPE html>
-<html>
-<head>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-<style>
-    body {{
-        background-color: transparent; 
-        display: flex; 
-        flex-direction: column; 
-        align-items: center; 
-        justify-content: center; 
-        margin: 0; 
-        padding: 20px 0; /* Agrega espacio para que la sombra no se corte */
-        font-family: 'Inter', system-ui, -apple-system, sans-serif;
-        color: #ffffff;
-    }}
-    .vinyl {{
-        width: 185px; height: 185px; border-radius: 50%; position: relative; 
-        display: flex; justify-content: center; align-items: center;
-        background: radial-gradient(circle at center, transparent 38%, rgba(0,0,0,0.85) 39%, transparent 40%),
-                    repeating-radial-gradient(circle at center, #0d0d0d 0px, #0d0d0d 2px, #222 3px, #141414 4px),
-                    conic-gradient(from 45deg, #050505, #3d3d3d 22deg, #050505 45deg, #050505 225deg, #3d3d3d 247deg, #050505 270deg);
-        box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 20px {v_color};
-        border: 1px solid #1a1a1a;
-        cursor: pointer;
-        margin-bottom: 5px;
-    }}
-    .center-label {{
-        width: 76px; height: 76px; border-radius: 50%;
-        display: flex; justify-content: center; align-items: center; z-index: 2;
-        box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 0 8px {v_color};
-        transition: all 0.5s ease;
-        {label_style}
-    }}
-    .center-hole {{ 
-        width: 10px; height: 10px; background: #ffffff; border-radius: 50%; box-shadow: inset 0 0 2px rgba(0,0,0,0.8);
-    }}
-    .spin {{ animation: spin 2.2s linear infinite; }}
-    .paused {{ animation-play-state: paused !important; }}
-    @keyframes spin {{ 100% {{ transform: rotate(360deg); }} }}
+def anterior_cancion():
+    if st.session_state.playlist and st.session_state.current_index > 0:
+        st.session_state.current_index -= 1
 
-    /* TARJETA DEL REPRODUCTOR */
-    .player-card {{
-        width: 100%;
-        max-width: 440px;
-        background-color: #16161a;
-        border: 1px solid #2a2a30;
-        border-radius: 16px;
-        padding: 16px 20px;
-        margin-top: 18px;
-        box-shadow: 0 0 20px rgba(0,0,0,0.6), 0 0 10px {v_color}40;
-        box-sizing: border-box;
-    }}
-    .song-details {{
-        text-align: center;
-        margin-bottom: 12px;
-        font-size: 0.92rem;
-        font-weight: 600;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        color: #f0f0f0;
-    }}
-    
-    /* BARRA DE PROGRESO Y TIEMPO */
-    .progress-container {{
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 12px;
-    }}
-    .time-stamp {{
-        font-size: 0.78rem;
-        color: #a0a0a0;
-        min-width: 36px;
-        font-weight: 500;
-    }}
-    .progress-bar {{
-        flex-grow: 1;
-        -webkit-appearance: none;
-        appearance: none;
-        height: 5px;
-        border-radius: 5px;
-        background: linear-gradient(to right, {v_color} 0%, #33333d 0%);
-        outline: none;
-        cursor: pointer;
-    }}
-    .progress-bar::-webkit-slider-thumb {{
-        -webkit-appearance: none;
-        appearance: none;
-        width: 13px;
-        height: 13px;
-        border-radius: 50%;
-        background: {v_color};
-        cursor: pointer;
-        box-shadow: 0 0 8px {v_color};
-    }}
+def agregar_a_playlist(song):
+    st.session_state.playlist.append(song)
+    if st.session_state.current_index == -1:
+        st.session_state.current_index = 0
 
-    /* CONTROLES (PLAY/PAUSA Y VOLUMEN) */
-    .controls-row {{
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-    }}
-    .btn-play {{
-        background-color: {v_color};
-        color: #ffffff;
-        border: none;
-        border-radius: 50px;
-        padding: 8px 22px;
-        font-size: 0.9rem;
-        font-weight: 700;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-        box-shadow: 0 0 10px {v_color}80;
-    }}
-    .btn-play:hover {{
-        transform: scale(1.04);
-    }}
-    .volume-box {{
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        color: #a0a0a0;
-        font-size: 0.85rem;
-    }}
-    .volume-slider {{
-        -webkit-appearance: none;
-        appearance: none;
-        width: 90px;
-        height: 5px;
-        border-radius: 5px;
-        background: linear-gradient(to right, {v_color} 100%, #33333d 100%);
-        outline: none;
-        cursor: pointer;
-    }}
-    .volume-slider::-webkit-slider-thumb {{
-        -webkit-appearance: none;
-        appearance: none;
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        background: #ffffff;
-        box-shadow: 0 0 6px {v_color};
-        cursor: pointer;
-    }}
+def eliminar_de_playlist(idx):
+    if 0 <= idx < len(st.session_state.playlist):
+        st.session_state.playlist.pop(idx)
+        if len(st.session_state.playlist) == 0:
+            st.session_state.current_index = -1
+        elif st.session_state.current_index >= len(st.session_state.playlist):
+            st.session_state.current_index = len(st.session_state.playlist) - 1
 
-    /* SOLUCIÓN AL BLOQUEO DE YOUTUBE: Tamaño normal pero totalmente transparente */
-    .offscreen-player {{
-        position: absolute;
-        width: 200px;
-        height: 200px;
-        opacity: 0.001; 
-        pointer-events: none;
-        z-index: -99;
-    }}
+# Obtener canción actual
+cancion_actual = None
+if 0 <= st.session_state.current_index < len(st.session_state.playlist):
+    cancion_actual = st.session_state.playlist[st.session_state.current_index]
 
-    .error-notice {{
-        display: none;
-        color: #ff4444;
-        font-size: 0.82rem;
-        text-align: center;
-        margin-top: 8px;
-    }}
-</style>
-</head>
-<body>
+v_id = cancion_actual['video_id'] if cancion_actual else ""
+s_title = cancion_actual['title'] if cancion_actual else ""
+s_artist = cancion_actual['artist'] if cancion_actual else ""
+v_color = cancion_actual['color'] if cancion_actual else "#ff2222"
+thumb_url = cancion_actual['thumbnail'] if cancion_actual else ""
 
-    <!-- Vinilo Animado -->
-    <div id="vinyl-disk" class="vinyl" onclick="togglePlay()">
-        <div class="center-label"><div class="center-hole"></div></div>
-    </div>
+label_style = f"background-image: url('{thumb_url}'); background-size: cover; background-position: center; border: 2px solid {v_color};" if thumb_url else f"background-color: {v_color};"
 
-    <!-- Contenedor del Iframe API de Youtube -->
-    <div class="offscreen-player">
-        <div id="yt-player"></div>
-    </div>
+# ---------------------------------------------------------
+# ESTRUCTURA EN 2 COLUMNAS (REPRODUCTOR + PLAYLIST)
+# ---------------------------------------------------------
+col_main, col_queue = st.columns([1.6, 1.0], gap="large")
 
-    <!-- Tarjeta Interactiva del Reproductor -->
-    {"<div class='player-card'>" if v_id else "<div style='margin-top:15px; color:#777; font-size:0.9rem;'>Selecciona una canción para reproducir</div>"}
-    {"<div class='song-details'>▶ " + s_title + " — " + s_artist + "</div>" if v_id else ""}
-    {"<div class='progress-container'><span id='curr-time' class='time-stamp'>0:00</span><input type='range' id='progress' class='progress-bar' value='0' min='0' max='100' oninput='seekToTime(this.value)'><span id='total-dur' class='time-stamp'>0:00</span></div>" if v_id else ""}
-    {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-play'></i> <span id='btn-text'>Play</span></button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
-    {"<div id='err-msg' class='error-notice'>⚠️ Esta pista no permite reproducción incrustada. Elige otra canción.</div>" if v_id else ""}
-    {"</div>" if v_id else ""}
+with col_main:
+    html_reproductor_completo = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {{
+            background-color: transparent; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            margin: 0; 
+            padding: 10px 0;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            color: #ffffff;
+        }}
+        .vinyl {{
+            width: 175px; height: 175px; border-radius: 50%; position: relative; 
+            display: flex; justify-content: center; align-items: center;
+            background: radial-gradient(circle at center, transparent 38%, rgba(0,0,0,0.85) 39%, transparent 40%),
+                        repeating-radial-gradient(circle at center, #0d0d0d 0px, #0d0d0d 2px, #222 3px, #141414 4px),
+                        conic-gradient(from 45deg, #050505, #3d3d3d 22deg, #050505 45deg, #050505 225deg, #3d3d3d 247deg, #050505 270deg);
+            box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 20px {v_color};
+            border: 1px solid #1a1a1a;
+            cursor: pointer;
+            margin-bottom: 5px;
+        }}
+        .center-label {{
+            width: 72px; height: 72px; border-radius: 50%;
+            display: flex; justify-content: center; align-items: center; z-index: 2;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 0 8px {v_color};
+            transition: all 0.5s ease;
+            {label_style}
+        }}
+        .center-hole {{ 
+            width: 10px; height: 10px; background: #ffffff; border-radius: 50%; box-shadow: inset 0 0 2px rgba(0,0,0,0.8);
+        }}
+        .spin {{ animation: spin 2.2s linear infinite; }}
+        .paused {{ animation-play-state: paused !important; }}
+        @keyframes spin {{ 100% {{ transform: rotate(360deg); }} }}
 
-    <script src="https://www.youtube.com/iframe_api"></script>
-    <script>
-        var player;
-        var videoId = "{v_id}";
-        var vColor = "{v_color}";
-        var updateInterval;
-
-        function onYouTubeIframeAPIReady() {{
-            if (!videoId) return;
-            player = new YT.Player('yt-player', {{
-                height: '200', // Tamaño normal para evitar bloqueo por spam de YouTube
-                width: '200',
-                videoId: videoId,
-                playerVars: {{
-                    'autoplay': 0, 
-                    'controls': 0,
-                    'disablekb': 1,
-                    'fs': 0,
-                    'rel': 0,
-                    'playsinline': 1,
-                    'enablejsapi': 1
-                }},
-                events: {{
-                    'onReady': onPlayerReady,
-                    'onStateChange': onPlayerStateChange,
-                    'onError': onPlayerError
-                }}
-            }});
+        .player-card {{
+            width: 100%;
+            max-width: 440px;
+            background-color: #16161a;
+            border: 1px solid #2a2a30;
+            border-radius: 16px;
+            padding: 16px 20px;
+            margin-top: 12px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.6), 0 0 10px {v_color}40;
+            box-sizing: border-box;
+        }}
+        .song-details {{
+            text-align: center;
+            margin-bottom: 12px;
+            font-size: 0.92rem;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #f0f0f0;
+        }}
+        
+        .progress-container {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }}
+        .time-stamp {{
+            font-size: 0.78rem;
+            color: #a0a0a0;
+            min-width: 36px;
+            font-weight: 500;
+        }}
+        .progress-bar {{
+            flex-grow: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 5px;
+            border-radius: 5px;
+            background: linear-gradient(to right, {v_color} 0%, #33333d 0%);
+            outline: none;
+            cursor: pointer;
+        }}
+        .progress-bar::-webkit-slider-thumb {{
+            -webkit-appearance: none;
+            appearance: none;
+            width: 13px;
+            height: 13px;
+            border-radius: 50%;
+            background: {v_color};
+            cursor: pointer;
+            box-shadow: 0 0 8px {v_color};
         }}
 
-        function onPlayerReady(event) {{
-            // Intentar reproducir si el navegador lo permite
-            try {{
-                event.target.playVideo();
-            }} catch (e) {{
-                console.log("Esperando interacción del usuario.");
-            }}
-            startUpdateLoop();
+        .controls-row {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }}
+        .btn-play {{
+            background-color: {v_color};
+            color: #ffffff;
+            border: none;
+            border-radius: 50px;
+            padding: 8px 22px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 0 10px {v_color}80;
+        }}
+        .btn-play:hover {{ transform: scale(1.04); }}
+        .volume-box {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #a0a0a0;
+            font-size: 0.85rem;
+        }}
+        .volume-slider {{
+            -webkit-appearance: none;
+            appearance: none;
+            width: 90px;
+            height: 5px;
+            border-radius: 5px;
+            background: linear-gradient(to right, {v_color} 100%, #33333d 100%);
+            outline: none;
+            cursor: pointer;
+        }}
+        .volume-slider::-webkit-slider-thumb {{
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 0 6px {v_color};
+            cursor: pointer;
         }}
 
-        function updateUIState(playing) {{
-            var vinyl = document.getElementById('vinyl-disk');
-            var btnIcon = document.getElementById('play-icon');
-            var btnText = document.getElementById('btn-text');
-
-            if (playing) {{
-                if (vinyl) {{ vinyl.classList.add('spin'); vinyl.classList.remove('paused'); }}
-                if (btnIcon) btnIcon.className = "fas fa-pause";
-                if (btnText) btnText.innerText = "Pausa";
-            }} else {{
-                if (vinyl) {{ vinyl.classList.add('paused'); }}
-                if (btnIcon) btnIcon.className = "fas fa-play";
-                if (btnText) btnText.innerText = "Play";
-            }}
+        .offscreen-player {{
+            position: absolute;
+            width: 200px;
+            height: 200px;
+            opacity: 0.001; 
+            pointer-events: none;
+            z-index: -99;
         }}
+    </style>
+    </head>
+    <body>
 
-        function onPlayerStateChange(event) {{
-            // YT.PlayerState.PLAYING == 1
-            if (event.data === 1) {{
-                updateUIState(true);
-            }} 
-            // Pausado (2), Terminado (0), Unstarted (-1), Cued (5)
-            else if (event.data === 2 || event.data === 0 || event.data === -1 || event.data === 5) {{
-                updateUIState(false);
-            }}
-        }}
+        <div id="vinyl-disk" class="vinyl" onclick="togglePlay()">
+            <div class="center-label"><div class="center-hole"></div></div>
+        </div>
 
-        function togglePlay() {{
-            if (!player || typeof player.getPlayerState !== 'function') return;
-            var state = player.getPlayerState();
-            
-            if (state === 1 || state === 3) {{ // 1: Playing, 3: Buffering
-                player.pauseVideo();
-            }} else {{
-                player.playVideo();
-            }}
-        }}
+        <div class="offscreen-player"><div id="yt-player"></div></div>
 
-        function changeVolume(val) {{
-            if (player && typeof player.setVolume === 'function') {{
-                player.setVolume(val);
-            }}
-            var volSlider = document.getElementById('vol-slider');
-            if (volSlider) {{
-                volSlider.style.background = 'linear-gradient(to right, ' + vColor + ' ' + val + '%, #33333d ' + val + '%)';
-            }}
-        }}
+        {"<div class='player-card'>" if v_id else "<div style='margin-top:15px; color:#777; font-size:0.9rem;'>Agrega una canción a la lista para comenzar</div>"}
+        {"<div class='song-details'>▶ " + s_title + " — " + s_artist + "</div>" if v_id else ""}
+        {"<div class='progress-container'><span id='curr-time' class='time-stamp'>0:00</span><input type='range' id='progress' class='progress-bar' value='0' min='0' max='100' oninput='seekToTime(this.value)'><span id='total-dur' class='time-stamp'>0:00</span></div>" if v_id else ""}
+        {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-play'></i> <span id='btn-text'>Play</span></button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
+        {"</div>" if v_id else ""}
 
-        function seekToTime(val) {{
-            if (player && typeof player.getDuration === 'function') {{
-                var dur = player.getDuration();
-                if (dur > 0) {{
-                    var target = (val / 100) * dur;
-                    player.seekTo(target, true);
-                    var prog = document.getElementById('progress');
-                    if (prog) {{
-                        prog.style.background = 'linear-gradient(to right, ' + vColor + ' ' + val + '%, #33333d ' + val + '%)';
+        <script src="https://www.youtube.com/iframe_api"></script>
+        <script>
+            var player;
+            var videoId = "{v_id}";
+            var vColor = "{v_color}";
+            var updateInterval;
+
+            function onYouTubeIframeAPIReady() {{
+                if (!videoId) return;
+                player = new YT.Player('yt-player', {{
+                    height: '200',
+                    width: '200',
+                    videoId: videoId,
+                    playerVars: {{
+                        'autoplay': 1, 
+                        'controls': 0,
+                        'disablekb': 1,
+                        'fs': 0,
+                        'rel': 0,
+                        'playsinline': 1,
+                        'enablejsapi': 1
+                    }},
+                    events: {{
+                        'onReady': onPlayerReady,
+                        'onStateChange': onPlayerStateChange
                     }}
+                }});
+            }}
+
+            function onPlayerReady(event) {{
+                try {{ event.target.playVideo(); }} catch (e) {{}}
+                startUpdateLoop();
+            }}
+
+            function updateUIState(playing) {{
+                var vinyl = document.getElementById('vinyl-disk');
+                var btnIcon = document.getElementById('play-icon');
+                var btnText = document.getElementById('btn-text');
+
+                if (playing) {{
+                    if (vinyl) {{ vinyl.classList.add('spin'); vinyl.classList.remove('paused'); }}
+                    if (btnIcon) btnIcon.className = "fas fa-pause";
+                    if (btnText) btnText.innerText = "Pausa";
+                }} else {{
+                    if (vinyl) {{ vinyl.classList.add('paused'); }}
+                    if (btnIcon) btnIcon.className = "fas fa-play";
+                    if (btnText) btnText.innerText = "Play";
                 }}
             }}
-        }}
 
-        function formatTime(sec) {{
-            sec = Math.floor(sec || 0);
-            var m = Math.floor(sec / 60);
-            var s = sec % 60;
-            return m + ":" + (s < 10 ? "0" : "") + s;
-        }}
+            function onPlayerStateChange(event) {{
+                if (event.data === 1) updateUIState(true);
+                else if (event.data === 2 || event.data === 0 || event.data === -1 || event.data === 5) updateUIState(false);
+            }}
 
-        function startUpdateLoop() {{
-            if (updateInterval) clearInterval(updateInterval);
-            updateInterval = setInterval(function() {{
-                if (player && typeof player.getCurrentTime === 'function' && typeof player.getDuration === 'function') {{
-                    var cur = player.getCurrentTime();
+            function togglePlay() {{
+                if (!player || typeof player.getPlayerState !== 'function') return;
+                var state = player.getPlayerState();
+                if (state === 1 || state === 3) player.pauseVideo();
+                else player.playVideo();
+            }}
+
+            function changeVolume(val) {{
+                if (player && typeof player.setVolume === 'function') player.setVolume(val);
+                var volSlider = document.getElementById('vol-slider');
+                if (volSlider) volSlider.style.background = 'linear-gradient(to right, ' + vColor + ' ' + val + '%, #33333d ' + val + '%)';
+            }}
+
+            function seekToTime(val) {{
+                if (player && typeof player.getDuration === 'function') {{
                     var dur = player.getDuration();
                     if (dur > 0) {{
-                        var pct = (cur / dur) * 100;
-                        var currElem = document.getElementById('curr-time');
-                        var totalElem = document.getElementById('total-dur');
-                        var progElem = document.getElementById('progress');
-
-                        if (currElem) currElem.innerText = formatTime(cur);
-                        if (totalElem) totalElem.innerText = formatTime(dur);
-                        if (progElem) {{
-                            progElem.value = pct;
-                            progElem.style.background = 'linear-gradient(to right, ' + vColor + ' ' + pct + '%, #33333d ' + pct + '%)';
-                        }}
+                        player.seekTo((val / 100) * dur, true);
                     }}
                 }}
-            }}, 300);
-        }}
+            }}
 
-        function onPlayerError(e) {{
-            var err = document.getElementById('err-msg');
-            if (err) err.style.display = 'block';
-        }}
-    </script>
-</body>
-</html>
-"""
+            function formatTime(sec) {{
+                sec = Math.floor(sec || 0);
+                var m = Math.floor(sec / 60);
+                var s = sec % 60;
+                return m + ":" + (s < 10 ? "0" : "") + s;
+            }}
 
-# AUMENTADO A 460px PARA QUE EL VINILO NUNCA SE VEA CORTADO
-altura_componente = 460 if st.session_state.video_id else 210
-components.html(html_reproductor_completo, height=altura_componente)
+            function startUpdateLoop() {{
+                if (updateInterval) clearInterval(updateInterval);
+                updateInterval = setInterval(function() {{
+                    if (player && typeof player.getCurrentTime === 'function' && typeof player.getDuration === 'function') {{
+                        var cur = player.getCurrentTime();
+                        var dur = player.getDuration();
+                        if (dur > 0) {{
+                            var pct = (cur / dur) * 100;
+                            var currElem = document.getElementById('curr-time');
+                            var totalElem = document.getElementById('total-dur');
+                            var progElem = document.getElementById('progress');
+
+                            if (currElem) currElem.innerText = formatTime(cur);
+                            if (totalElem) totalElem.innerText = formatTime(dur);
+                            if (progElem) {{
+                                progElem.value = pct;
+                                progElem.style.background = 'linear-gradient(to right, ' + vColor + ' ' + pct + '%, #33333d ' + pct + '%)';
+                            }}
+                        }}
+                    }}
+                }}, 300);
+            }}
+        </script>
+    </body>
+    </html>
+    """
+
+    altura_componente = 440 if cancion_actual else 210
+    components.html(html_reproductor_completo, height=altura_componente)
+
+    # BOTONES SIGUIENTE Y ANTERIOR
+    if st.session_state.playlist:
+        col_prev, col_info, col_next = st.columns([0.35, 0.3, 0.35], vertical_alignment="center")
+        with col_prev:
+            st.button("⏮️ Anterior", on_click=anterior_cancion, disabled=(st.session_state.current_index <= 0), use_container_width=True)
+        with col_info:
+            st.markdown(f"<div style='text-align:center; font-size:0.85rem; color:#888;'>{st.session_state.current_index + 1} de {len(st.session_state.playlist)}</div>", unsafe_allow_html=True)
+        with col_next:
+            st.button("Siguiente ⏭️", on_click=siguiente_cancion, disabled=(st.session_state.current_index >= len(st.session_state.playlist) - 1), use_container_width=True)
+
+    # FORMULARIO DE BÚSQUEDA
+    with st.form(key="search_form", border=False):
+        col_btn, col_input = st.columns([0.22, 0.78], vertical_alignment="center")
+        with col_btn:
+            btn_buscar = st.form_submit_button("Buscar", use_container_width=True)
+        with col_input:
+            query_input = st.text_input("Búsqueda", placeholder="Buscar canción, artista o género...", label_visibility="collapsed")
+
+    if btn_buscar and query_input.strip():
+        st.session_state.current_query = query_input.strip()
+
+    # RESULTADOS DE BÚSQUEDA
+    if st.session_state.current_query:
+        st.write("### Sugerencias")
+        if ytmusic is None:
+            st.error("No se pudo conectar a YouTube Music.")
+        else:
+            try:
+                resultados = ytmusic.search(st.session_state.current_query, filter="videos", limit=6)
+                if not resultados:
+                    resultados = ytmusic.search(st.session_state.current_query, limit=6)
+                
+                if not resultados:
+                    st.info("No se encontraron resultados para tu búsqueda.")
+                else:
+                    for idx, item in enumerate(resultados):
+                        v_id_item = item.get('videoId')
+                        if not v_id_item:
+                            continue
+                        
+                        titulo = item.get('title', 'Canción desconocida')
+                        artistas_list = item.get('artists', [])
+                        artistas = ", ".join([a['name'] for a in artistas_list if 'name' in a]) or item.get('author', 'Artista')
+                        duracion = item.get('duration', '')
+                        thumbnails = item.get('thumbnails', [])
+                        thumb_item = thumbnails[-1]['url'] if thumbnails else ""
+                        
+                        texto_opcion = f"➕  {titulo} — {artistas}" + (f" ({duracion})" if duracion else "")
+                        
+                        col_img, col_btn_song = st.columns([0.15, 0.85], vertical_alignment="center")
+                        with col_img:
+                            if thumb_item:
+                                st.image(thumb_item, use_container_width=True)
+                        with col_btn_song:
+                            if st.button(texto_opcion, key=f"song_{v_id_item}_{idx}"):
+                                nueva_cancion = {
+                                    'video_id': v_id_item,
+                                    'title': titulo,
+                                    'artist': artistas,
+                                    'thumbnail': thumb_item,
+                                    'color': obtener_color_aleatorio()
+                                }
+                                agregar_a_playlist(nueva_cancion)
+                                st.toast(f"Añadida a la lista: {titulo}", icon="🎵")
+                                st.rerun()
+                                
+            except Exception as e:
+                st.error(f"Error al realizar la búsqueda: {str(e)}")
 
 # ---------------------------------------------------------
-# FORMULARIO DE BÚSQUEDA EN TIEMPO REAL
+# COLUMNA DERECHA: LISTA DE ESPERA (PLAYLIST)
 # ---------------------------------------------------------
-with st.form(key="search_form", border=False):
-    col_btn, col_input = st.columns([0.18, 0.82], vertical_alignment="center")
-    with col_btn:
-        btn_buscar = st.form_submit_button("Buscar", use_container_width=True)
-    with col_input:
-        query_input = st.text_input("Búsqueda", placeholder="Buscar canción, artista o género...", label_visibility="collapsed")
-
-if btn_buscar and query_input.strip():
-    st.session_state.current_query = query_input.strip()
-
-# ---------------------------------------------------------
-# BÚSQUEDA GLOBAL Y RESULTADOS CON MINIATURAS
-# ---------------------------------------------------------
-if st.session_state.current_query:
-    st.write("### Sugerencias")
+with col_queue:
+    st.markdown("### 📜 Lista de espera")
     
-    if ytmusic is None:
-        st.error("No se pudo conectar a YouTube Music.")
+    if not st.session_state.playlist:
+        st.info("La lista está vacía. ¡Busca canciones y agrégalas!")
     else:
-        try:
-            resultados = ytmusic.search(st.session_state.current_query, filter="videos", limit=8)
-            if not resultados:
-                resultados = ytmusic.search(st.session_state.current_query, limit=8)
+        for idx, item in enumerate(st.session_state.playlist):
+            es_actual = (idx == st.session_state.current_index)
             
-            if not resultados:
-                st.info("No se encontraron resultados para tu búsqueda.")
-            else:
-                for idx, item in enumerate(resultados):
-                    v_id = item.get('videoId')
-                    if not v_id:
-                        continue
-                    
-                    titulo = item.get('title', 'Canción desconocida')
-                    artistas_list = item.get('artists', [])
-                    artistas = ", ".join([a['name'] for a in artistas_list if 'name' in a])
-                    if not artistas:
-                        artistas = item.get('author', 'Artista')
-                    
-                    duracion = item.get('duration', '')
-                    
-                    # Obtener miniatura devuelta por la API
-                    thumbnails = item.get('thumbnails', [])
-                    thumb_url = thumbnails[-1]['url'] if thumbnails else ""
-                    
-                    texto_opcion = f"🎵  {titulo} — {artistas}" + (f" ({duracion})" if duracion else "")
-                    
-                    col_img, col_btn = st.columns([0.14, 0.86], vertical_alignment="center")
-                    with col_img:
-                        if thumb_url:
-                            st.image(thumb_url, use_container_width=True)
-                    with col_btn:
-                        if st.button(texto_opcion, key=f"song_{v_id}_{idx}"):
-                            st.session_state.video_id = v_id
-                            st.session_state.song_title = titulo
-                            st.session_state.artist_name = artistas
-                            st.session_state.vinyl_color = obtener_color_aleatorio()
-                            st.session_state.thumbnail_url = thumb_url
-                            st.rerun()
-                            
-        except Exception as e:
-            st.error(f"Error al realizar la búsqueda: {str(e)}")
+            c_img, c_info, c_act1, c_act2 = st.columns([0.2, 0.52, 0.14, 0.14], vertical_alignment="center")
+            
+            with c_img:
+                if item['thumbnail']:
+                    st.image(item['thumbnail'], use_container_width=True)
+            
+            with c_info:
+                color_texto = "#ff4444" if es_actual else "#e0e0e0"
+                icono = "▶ " if es_actual else ""
+                st.markdown(
+                    f"<div style='line-height:1.2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'>"
+                    f"<span style='color:{color_texto}; font-weight:700; font-size:0.86rem;'>{icono}{item['title']}</span><br>"
+                    f"<span style='color:#888888; font-size:0.76rem;'>{item['artist']}</span>"
+                    f"</div>", 
+                    unsafe_allow_html=True
+                )
+            
+            with c_act1:
+                if not es_actual:
+                    if st.button("▶", key=f"play_now_{idx}_{item['video_id']}"):
+                        reproducir_indice(idx)
+                        st.rerun()
+            
+            with c_act2:
+                if st.button("❌", key=f"del_{idx}_{item['video_id']}"):
+                    eliminar_de_playlist(idx)
+                    st.rerun()
+        
+        st.write("")
+        if st.button("🗑️ Limpiar lista", use_container_width=True):
+            st.session_state.playlist = []
+            st.session_state.current_index = -1
+            st.rerun()
