@@ -217,22 +217,23 @@ html_reproductor_completo = f"""
         align-items: center; 
         justify-content: center; 
         margin: 0; 
-        padding: 0;
+        padding: 20px 0; /* Agrega espacio para que la sombra no se corte */
         font-family: 'Inter', system-ui, -apple-system, sans-serif;
         color: #ffffff;
     }}
     .vinyl {{
-        width: 175px; height: 175px; border-radius: 50%; position: relative; 
+        width: 185px; height: 185px; border-radius: 50%; position: relative; 
         display: flex; justify-content: center; align-items: center;
         background: radial-gradient(circle at center, transparent 38%, rgba(0,0,0,0.85) 39%, transparent 40%),
                     repeating-radial-gradient(circle at center, #0d0d0d 0px, #0d0d0d 2px, #222 3px, #141414 4px),
                     conic-gradient(from 45deg, #050505, #3d3d3d 22deg, #050505 45deg, #050505 225deg, #3d3d3d 247deg, #050505 270deg);
-        box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 18px {v_color};
+        box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 20px {v_color};
         border: 1px solid #1a1a1a;
         cursor: pointer;
+        margin-bottom: 5px;
     }}
     .center-label {{
-        width: 68px; height: 68px; border-radius: 50%;
+        width: 76px; height: 76px; border-radius: 50%;
         display: flex; justify-content: center; align-items: center; z-index: 2;
         box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 0 8px {v_color};
         transition: all 0.5s ease;
@@ -354,15 +355,14 @@ html_reproductor_completo = f"""
         cursor: pointer;
     }}
 
-    /* CONTENEDOR DE AUDIO OFF-SCREEN (ACTIVO EN DOM SIN DESCUADRAR LA INTERFAZ) */
+    /* Contenedor invisible pero seguro para evitar bloqueos del navegador */
     .offscreen-player {{
         position: absolute;
-        top: -9999px;
-        left: -9999px;
-        width: 200px;
-        height: 200px;
-        opacity: 0.001;
-        pointer-events: none;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        opacity: 0.01;
+        z-index: -1;
     }}
 
     .error-notice {{
@@ -376,12 +376,12 @@ html_reproductor_completo = f"""
 </head>
 <body>
 
-    <!-- Vinilo Animado -->
+    <!-- Vinilo Animado (Ahora con más espacio para que no se corte) -->
     <div id="vinyl-disk" class="vinyl" onclick="togglePlay()">
         <div class="center-label"><div class="center-hole"></div></div>
     </div>
 
-    <!-- Contenedor invisible pero activo para la API de YouTube -->
+    <!-- Contenedor del Iframe API de Youtube -->
     <div class="offscreen-player">
         <div id="yt-player"></div>
     </div>
@@ -404,18 +404,17 @@ html_reproductor_completo = f"""
         function onYouTubeIframeAPIReady() {{
             if (!videoId) return;
             player = new YT.Player('yt-player', {{
-                height: '200',
-                width: '200',
+                height: '1',
+                width: '1',
                 videoId: videoId,
                 playerVars: {{
-                    'autoplay': 1,
+                    'autoplay': 0, // Evita que el navegador bloquee el autoplay por políticas estrictas
                     'controls': 0,
                     'disablekb': 1,
                     'fs': 0,
                     'rel': 0,
                     'playsinline': 1,
-                    'enablejsapi': 1,
-                    'origin': window.location.origin
+                    'enablejsapi': 1
                 }},
                 events: {{
                     'onReady': onPlayerReady,
@@ -426,10 +425,11 @@ html_reproductor_completo = f"""
         }}
 
         function onPlayerReady(event) {{
+            // Intentar reproducir si el navegador lo permite
             try {{
                 event.target.playVideo();
             }} catch (e) {{
-                console.log("El navegador bloqueó el autoplay. Se requiere clic del usuario.");
+                console.log("Esperando interacción del usuario.");
             }}
             startUpdateLoop();
         }}
@@ -451,9 +451,12 @@ html_reproductor_completo = f"""
         }}
 
         function onPlayerStateChange(event) {{
-            if (event.data == YT.PlayerState.PLAYING) {{
+            // YT.PlayerState.PLAYING == 1
+            if (event.data === 1) {{
                 updateUIState(true);
-            }} else if (event.data == YT.PlayerState.PAUSED || event.data == YT.PlayerState.ENDED || event.data == -1 || event.data == YT.PlayerState.CUED) {{
+            }} 
+            // Pausado (2), Terminado (0), Unstarted (-1), Cued (5)
+            else if (event.data === 2 || event.data === 0 || event.data === -1 || event.data === 5) {{
                 updateUIState(false);
             }}
         }}
@@ -461,8 +464,8 @@ html_reproductor_completo = f"""
         function togglePlay() {{
             if (!player || typeof player.getPlayerState !== 'function') return;
             var state = player.getPlayerState();
-            // Si está reproduciendo, paúsalo. Si está en cualquier otro estado, reprodúcelo.
-            if (state === YT.PlayerState.PLAYING) {{
+            
+            if (state === 1 || state === 3) {{ // 1: Playing, 3: Buffering
                 player.pauseVideo();
             }} else {{
                 player.playVideo();
@@ -532,7 +535,8 @@ html_reproductor_completo = f"""
 </html>
 """
 
-altura_componente = 360 if st.session_state.video_id else 210
+# AUMENTADO A 460px PARA QUE EL VINILO NUNCA SE VEA CORTADO
+altura_componente = 460 if st.session_state.video_id else 210
 components.html(html_reproductor_completo, height=altura_componente)
 
 # ---------------------------------------------------------
