@@ -210,16 +210,26 @@ html_reproductor_completo = f"""
 <head>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 <style>
+    * {{
+        box-sizing: border-box;
+    }}
     body {{
         background-color: transparent; 
         display: flex; 
         flex-direction: column; 
         align-items: center; 
-        justify-content: center; 
+        justify-content: flex-start; 
         margin: 0; 
-        padding: 0;
+        padding: 18px 0;
         font-family: 'Inter', system-ui, -apple-system, sans-serif;
         color: #ffffff;
+        overflow: hidden;
+    }}
+    .vinyl-wrapper {{
+        padding: 12px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
     }}
     .vinyl {{
         width: 175px; height: 175px; border-radius: 50%; position: relative; 
@@ -227,7 +237,7 @@ html_reproductor_completo = f"""
         background: radial-gradient(circle at center, transparent 38%, rgba(0,0,0,0.85) 39%, transparent 40%),
                     repeating-radial-gradient(circle at center, #0d0d0d 0px, #0d0d0d 2px, #222 3px, #141414 4px),
                     conic-gradient(from 45deg, #050505, #3d3d3d 22deg, #050505 45deg, #050505 225deg, #3d3d3d 247deg, #050505 270deg);
-        box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 18px {v_color};
+        box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 20px {v_color};
         border: 1px solid #1a1a1a;
     }}
     .center-label {{
@@ -252,9 +262,8 @@ html_reproductor_completo = f"""
         border: 1px solid #2a2a30;
         border-radius: 16px;
         padding: 16px 20px;
-        margin-top: 18px;
+        margin-top: 14px;
         box-shadow: 0 0 20px rgba(0,0,0,0.6), 0 0 10px {v_color}40;
-        box-sizing: border-box;
     }}
     .song-details {{
         text-align: center;
@@ -353,15 +362,18 @@ html_reproductor_completo = f"""
         cursor: pointer;
     }}
 
-    /* CONTENEDOR DE AUDIO OFF-SCREEN (ACTIVO EN DOM SIN DESCUADRAR LA INTERFAZ) */
-    .offscreen-player {{
+    /* REPRODUCTOR OCULTO PERO ACTIVO DENTRO DEL VIEWPORT */
+    .hidden-yt-wrapper {{
         position: absolute;
-        top: -9999px;
-        left: -9999px;
-        width: 200px;
-        height: 200px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 2px;
+        height: 2px;
         opacity: 0.001;
         pointer-events: none;
+        z-index: -10;
+        overflow: hidden;
     }}
 
     .error-notice {{
@@ -375,21 +387,23 @@ html_reproductor_completo = f"""
 </head>
 <body>
 
-    <!-- Vinilo Animado (Original) -->
-    <div id="vinyl-disk" class="vinyl">
-        <div class="center-label"><div class="center-hole"></div></div>
+    <!-- Vinilo Animado (Sin recortes) -->
+    <div class="vinyl-wrapper">
+        <div id="vinyl-disk" class="vinyl">
+            <div class="center-label"><div class="center-hole"></div></div>
+        </div>
     </div>
 
-    <!-- Contenedor invisible pero activo para la API de YouTube -->
-    <div class="offscreen-player">
+    <!-- Contenedor activo e in-viewport para evitar bloqueos del navegador -->
+    <div class="hidden-yt-wrapper">
         <div id="yt-player"></div>
     </div>
 
-    <!-- Tarjeta Interactiva del Reproductor (Original) -->
+    <!-- Tarjeta Interactiva del Reproductor -->
     {"<div class='player-card'>" if v_id else "<div style='margin-top:15px; color:#777; font-size:0.9rem;'>Selecciona una canción para reproducir</div>"}
     {"<div class='song-details'>▶ " + s_title + " — " + s_artist + "</div>" if v_id else ""}
     {"<div class='progress-container'><span id='curr-time' class='time-stamp'>0:00</span><input type='range' id='progress' class='progress-bar' value='0' min='0' max='100' oninput='seekToTime(this.value)'><span id='total-dur' class='time-stamp'>0:00</span></div>" if v_id else ""}
-    {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-play'></i> <span id='btn-text'>Play</span></button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
+    {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-pause'></i> <span id='btn-text'>Pausa</span></button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
     {"<div id='err-msg' class='error-notice'>⚠️ Esta pista no permite reproducción incrustada. Elige otra canción.</div>" if v_id else ""}
     {"</div>" if v_id else ""}
 
@@ -413,8 +427,7 @@ html_reproductor_completo = f"""
                     'disablekb': 1,
                     'fs': 0,
                     'rel': 0,
-                    'playsinline': 1,
-                    'origin': window.location.origin
+                    'playsinline': 1
                 }},
                 events: {{
                     'onReady': onPlayerReady,
@@ -527,7 +540,8 @@ html_reproductor_completo = f"""
 </html>
 """
 
-altura_componente = 360 if st.session_state.video_id else 210
+# Altura ampliada del componente iframe para alojar holgadamente el vinilo y su resplandor
+altura_componente = 410 if st.session_state.video_id else 240
 components.html(html_reproductor_completo, height=altura_componente)
 
 # ---------------------------------------------------------
