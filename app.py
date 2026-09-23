@@ -10,70 +10,114 @@ def get_ytmusic():
 
 ytmusic = get_ytmusic()
 
-# Configuración de la página
-st.set_page_config(page_title="MusicNow", page_icon="🎵", layout="centered")
+# Configuración de la página (sin emoji en el icono)
+st.set_page_config(page_title="MusicNow", layout="centered")
 
-# CSS Global para interfaz oscura, buscador minimalista y botones
+# CSS Global con fuentes góticas retro y buscador estilo burbuja
 st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=MedievalSharp&family=Pirata+One&display=swap');
+
     .stApp { 
-        background-color: #121212; 
-        color: white; 
+        background-color: #0e0e10; 
+        color: #e0e0e0; 
     }
     
-    /* Buscador minimalista redondeado con borde rojo */
-    .stTextInput > div > div > input {
-        background-color: #1a1a1a !important;
-        color: white !important;
-        border-radius: 30px !important;
-        border: 2px solid #ff3333 !important;
-        padding: 12px 22px !important;
-        font-size: 1rem !important;
-        box-shadow: none !important;
+    /* Fuente retro gótica para títulos */
+    .gothic-title {
+        font-family: 'Pirata One', cursive;
+        color: #ff2222;
+        text-align: center;
+        font-size: 5.2rem;
+        font-weight: 400;
+        margin-bottom: -10px;
+        letter-spacing: 3px;
+        text-shadow: 0 0 15px rgba(255, 34, 34, 0.4);
     }
     
-    .stTextInput > div > div > input:focus {
-        border-color: #ff1a1a !important;
-        box-shadow: 0 0 12px rgba(255, 51, 51, 0.4) !important;
+    .gothic-sub {
+        font-family: 'MedievalSharp', cursive;
+        color: #888888;
+        text-align: center;
+        font-size: 1.1rem;
+        letter-spacing: 2px;
+        margin-top: 0;
+        margin-bottom: 15px;
+        text-transform: uppercase;
+    }
+
+    /* Contenedor del buscador "Burbujeante" (Esquinas redondeadas y amplio espacio) */
+    .stTextInput > div > div {
+        background-color: #1a1a1e !important;
+        border-radius: 18px !important;
+        border: 2px solid #ff2222 !important;
+        padding: 6px 12px !important;
+        box-shadow: 0 4px 20px rgba(255, 34, 34, 0.15) !important;
+        transition: all 0.3s ease !important;
+    }
+
+    .stTextInput > div > div:focus-within {
+        border-color: #ff5555 !important;
+        box-shadow: 0 0 18px rgba(255, 34, 34, 0.4) !important;
+    }
+
+    /* Input interno (Amplio, sin estar aplastado) */
+    .stTextInput input {
+        background-color: transparent !important;
+        color: #f0f0f0 !important;
+        font-family: 'MedievalSharp', cursive, sans-serif !important;
+        font-size: 1.15rem !important;
+        padding: 12px 10px !important;
+        height: auto !important;
     }
 
     div[data-baseweb="input"] {
         background-color: transparent !important;
         border: none !important;
-        border-radius: 30px !important;
     }
 
-    /* Estilo de los botones de sugerencia */
+    /* Botones de sugerencias con tipografía retro */
     .stButton>button {
-        background-color: #1e1e1e; 
-        color: white; 
-        border: 1px solid #333; 
+        background-color: #16161a; 
+        color: #dcdcdc; 
+        font-family: 'MedievalSharp', cursive, sans-serif;
+        font-size: 1.05rem;
+        border: 1px solid #2a2a30; 
         border-radius: 12px; 
         width: 100%; 
         text-align: left; 
         transition: all 0.2s ease;
-        padding: 10px 15px;
-        margin-bottom: 4px;
+        padding: 12px 18px;
+        margin-bottom: 6px;
     }
+    
     .stButton>button:hover { 
-        background-color: #ff3333; 
-        border-color: #ff3333; 
-        color: white; 
-        transform: translateY(-1px);
+        background-color: #ff2222; 
+        border-color: #ff2222; 
+        color: #ffffff; 
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(255, 34, 34, 0.3);
+    }
+
+    h3 {
+        font-family: 'MedievalSharp', cursive !important;
+        color: #cccccc !important;
+        font-size: 1.3rem !important;
+        margin-top: 20px !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# Título principal
-st.markdown("<h1 style='text-align: center; color: #ff3333; font-size: 3.8rem; font-weight: 900; margin-bottom: 0;'>MusicNow</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #777; font-size: 1.1rem; margin-top: 0; margin-bottom: 10px;'>La rocola de la fiesta</p>", unsafe_allow_html=True)
+# Título principal gótico
+st.markdown("<h1 class='gothic-title'>MusicNow</h1>", unsafe_allow_html=True)
+st.markdown("<p class='gothic-sub'>La rocola de la fiesta</p>", unsafe_allow_html=True)
 
 # Estado global de reproducción
 if 'video_id' not in st.session_state:
     st.session_state.video_id = None
     st.session_state.song_title = None
     st.session_state.artist_name = None
-    st.session_state.vinyl_color = "#e60000" # Rojo clásico de la foto
+    st.session_state.vinyl_color = "#e60000"
 
 # Generador de color por artista
 def obtener_color_artista(artista):
@@ -92,12 +136,12 @@ if st.session_state.video_id:
         src="https://www.youtube.com/embed/{st.session_state.video_id}?autoplay=1&color=red" 
         frameborder="0" allow="autoplay; encrypted-media">
     </iframe>
-    <p style='color: #eee; font-family: sans-serif; text-align: center; margin-top: 12px; font-weight: bold;'>
-        🎶 {st.session_state.song_title}
+    <p style='color: #dddddd; font-family: "MedievalSharp", cursive; text-align: center; margin-top: 14px; font-size: 1.1rem;'>
+        Reproduciendo: {st.session_state.song_title}
     </p>
     """
 
-# HTML / CSS del Vinilo Realista (Efecto de luz diagonal, surcos y punto blanco al centro)
+# HTML / CSS del Vinilo Realista
 html_vinilo = f"""
 <!DOCTYPE html>
 <html>
@@ -110,33 +154,30 @@ html_vinilo = f"""
         align-items: center; 
         justify-content: center; 
         margin: 0; 
-        padding: 10px 0;
+        padding: 5px 0;
     }}
     
-    /* Disco de vinilo realista */
     .vinyl {{
-        width: 200px; 
-        height: 200px; 
+        width: 190px; 
+        height: 190px; 
         border-radius: 50%;
         position: relative; 
         display: flex; 
         justify-content: center; 
         align-items: center;
         
-        /* Capas de textura: Surcos radiales + reflejo de luz cónico brillante */
         background: 
             radial-gradient(circle at center, transparent 38%, rgba(0,0,0,0.85) 39%, transparent 40%),
             repeating-radial-gradient(circle at center, #0d0d0d 0px, #0d0d0d 2px, #222 3px, #141414 4px),
             conic-gradient(from 45deg, #050505, #3d3d3d 22deg, #050505 45deg, #050505 225deg, #3d3d3d 247deg, #050505 270deg);
             
-        box-shadow: 0 12px 28px rgba(0,0,0,0.95), inset 0 0 1px rgba(255,255,255,0.25);
+        box-shadow: 0 10px 25px rgba(0,0,0,0.95), inset 0 0 1px rgba(255,255,255,0.25);
         border: 1px solid #1a1a1a;
     }}
     
-    /* Etiqueta central circular */
     .center-label {{
-        width: 72px; 
-        height: 72px; 
+        width: 68px; 
+        height: 68px; 
         border-radius: 50%;
         background-color: {st.session_state.vinyl_color}; 
         display: flex; 
@@ -147,7 +188,6 @@ html_vinilo = f"""
         transition: background-color 0.6s ease;
     }}
     
-    /* Orificio central blanco como el de la foto */
     .center-hole {{ 
         width: 8px; 
         height: 8px; 
@@ -165,7 +205,7 @@ html_vinilo = f"""
     }}
     
     .yt-player {{
-        margin-top: 18px;
+        margin-top: 16px;
         border-radius: 12px;
         box-shadow: 0 0 12px {st.session_state.vinyl_color};
     }}
@@ -182,23 +222,23 @@ html_vinilo = f"""
 </html>
 """
 
-# Renderizar el componente del vinilo
-altura_componente = 370 if st.session_state.video_id else 240
+# Renderizar el vinilo
+altura_componente = 360 if st.session_state.video_id else 220
 components.html(html_vinilo, height=altura_componente)
 
-# Buscador abajo del vinilo
-query = st.text_input("", placeholder="Ej: Gasolina Daddy Yankee...")
+# Buscador estilo burbuja abajo del vinilo (sin emojis)
+query = st.text_input("", placeholder="Buscar cancion, artista o genero...")
 
 # Lógica de búsqueda y resultados
 if query:
-    st.write("### 🔥 Sugerencias:")
+    st.write("### Sugerencias")
     try:
         resultados = ytmusic.search(query, filter="songs", limit=10)
         
         for song in resultados:
             titulo = song.get('title', 'Desconocido')
             artistas = ", ".join([a['name'] for a in song.get('artists', [])])
-            texto_boton = f"🎵 {titulo} - {artistas}"
+            texto_boton = f"{titulo} - {artistas}"
             video_id = song.get('videoId')
             
             if video_id and st.button(texto_boton, key=video_id):
