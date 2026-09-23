@@ -13,7 +13,7 @@ ytmusic = get_ytmusic()
 # Configuración de la página
 st.set_page_config(page_title="MusicNow", layout="centered")
 
-# CSS Global con tipografía Inter y Ola RGBIC sobre fondo rojo
+# CSS Global con tipografía Inter, Ola RGBIC y eliminación de 'Press Enter to apply'
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap');
@@ -42,7 +42,7 @@ st.markdown("""
         letter-spacing: -1.5px;
     }
     
-    /* Subtítulo: Letra roja base con una ola de luz RGBIC que barre ida y vuelta */
+    /* Subtítulo: Letra roja base con una ola de luz RGBIC */
     .minimal-sub-wave {
         font-family: 'Inter', sans-serif;
         text-align: center;
@@ -52,7 +52,6 @@ st.markdown("""
         margin-bottom: 18px;
         letter-spacing: -0.2px;
         
-        /* Gradiente con base roja y ola brillante de colores en el centro */
         background: linear-gradient(
             90deg, 
             #ff2222 0%, 
@@ -70,7 +69,6 @@ st.markdown("""
         animation: rgbWaveSweep 3.8s ease-in-out infinite alternate;
     }
 
-    /* Animación de la ola barriendo de izquierda a derecha y devolviéndose */
     @keyframes rgbWaveSweep {
         0% {
             background-position: 100% 0%;
@@ -78,6 +76,12 @@ st.markdown("""
         100% {
             background-position: 0% 0%;
         }
+    }
+
+    /* OCULTAR MENSAJE 'Press Enter to apply' */
+    div[data-testid="stInputInstructions"], 
+    small[data-testid="stInputInstructions"] {
+        display: none !important;
     }
 
     /* Buscador minimalista redondeado */
@@ -108,7 +112,30 @@ st.markdown("""
         border: none !important;
     }
 
-    /* Botones de sugerencias minimalistas */
+    /* Botón de Buscar Específico (Rojo Opaco Elegante) */
+    .search-btn-wrapper .stButton>button {
+        background-color: #821c1c !important; 
+        color: #ffffff !important; 
+        font-family: 'Inter', sans-serif !important;
+        font-size: 0.95rem !important;
+        font-weight: 700 !important;
+        border: 1px solid #a82424 !important; 
+        border-radius: 25px !important; 
+        width: 100% !important; 
+        text-align: center !important; 
+        padding: 10px 16px !important;
+        transition: all 0.2s ease !important;
+        box-shadow: 0 4px 12px rgba(130, 28, 28, 0.3) !important;
+    }
+    
+    .search-btn-wrapper .stButton>button:hover { 
+        background-color: #a82424 !important; 
+        border-color: #ff2222 !important; 
+        box-shadow: 0 0 12px rgba(255, 34, 34, 0.4) !important;
+        transform: translateY(-1px);
+    }
+
+    /* Botones de sugerencias de canciones */
     .stButton>button {
         background-color: #16161a; 
         color: #e0e0e0; 
@@ -154,6 +181,9 @@ if 'video_id' not in st.session_state:
     st.session_state.song_title = None
     st.session_state.artist_name = None
     st.session_state.vinyl_color = "#e60000"
+
+if 'current_query' not in st.session_state:
+    st.session_state.current_query = ""
 
 # Generador de color por artista
 def obtener_color_artista(artista):
@@ -262,14 +292,26 @@ html_vinilo = f"""
 altura_componente = 340 if st.session_state.video_id else 200
 components.html(html_vinilo, height=altura_componente)
 
-# Buscador minimalista
-query = st.text_input("", placeholder="Buscar canción, artista o género...")
+# Buscador minimalista con botón alineado
+col_input, col_btn = st.columns([3.3, 1], vertical_alignment="bottom")
+
+with col_input:
+    query_input = st.text_input("", placeholder="Buscar canción, artista o género...", label_visibility="collapsed")
+
+with col_btn:
+    st.markdown('<div class="search-btn-wrapper">', unsafe_allow_html=True)
+    btn_buscar = st.button("Buscar", key="btn_buscar_action")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Actualizar término de búsqueda al presionar el botón "Buscar"
+if btn_buscar and query_input:
+    st.session_state.current_query = query_input
 
 # Resultados
-if query:
+if st.session_state.current_query:
     st.write("### Sugerencias")
     try:
-        resultados = ytmusic.search(query, filter="songs", limit=10)
+        resultados = ytmusic.search(st.session_state.current_query, filter="songs", limit=10)
         
         for song in resultados:
             titulo = song.get('title', 'Desconocido')
