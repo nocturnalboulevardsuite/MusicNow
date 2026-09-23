@@ -2,6 +2,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 from ytmusicapi import YTMusic
 import random
+import time
+import urllib.parse
 
 # Inicializar buscador de YouTube Music
 @st.cache_resource
@@ -14,7 +16,7 @@ def get_ytmusic():
 ytmusic = get_ytmusic()
 
 # Configuración de la página en formato ancho (wide)
-st.set_page_config(page_title="MusicNow", layout="wide")
+st.set_page_config(page_title="MusicNow - Party Mode", layout="wide")
 
 # CSS Global
 st.markdown("""
@@ -29,7 +31,7 @@ st.markdown("""
     
     .block-container {
         padding-top: 1.5rem !important;
-        padding-bottom: 1rem !important;
+        padding-bottom: 2rem !important;
         max-width: 1200px !important;
     }
 
@@ -195,17 +197,28 @@ st.markdown("""
         min-height: 36px !important;
         height: 36px !important;
     }
+
+    /* CONTENEDOR DEL CÓDIGO QR */
+    .qr-container {
+        background: rgba(22, 22, 26, 0.8);
+        border: 1px solid rgba(255, 34, 34, 0.3);
+        border-radius: 20px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 0 25px rgba(255, 34, 34, 0.15);
+        margin-top: 25px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # Encabezado principal
 st.markdown("<h1 class='minimal-title'>MusicNow</h1>", unsafe_allow_html=True)
 st.markdown(
-    "<p class='minimal-sub-wave'>Busca la música que quieras y crea tu lista de reproducción al instante</p>", 
+    "<p class='minimal-sub-wave'>🎉 ¡Modo Fiesta! Busca tu tema y añádelo a la lista</p>", 
     unsafe_allow_html=True
 )
 
-# Estado global de la cola de reproducción
+# Estado global de la cola de reproducción y tiempo de espera
 if 'playlist' not in st.session_state:
     st.session_state.playlist = []
 
@@ -214,6 +227,11 @@ if 'current_index' not in st.session_state:
 
 if 'current_query' not in st.session_state:
     st.session_state.current_query = ""
+
+if 'last_added_time' not in st.session_state:
+    st.session_state.last_added_time = 0
+
+COOLDOWN_SECONDS = 300  # 5 minutos de espera entre cada canción agregada
 
 def obtener_color_aleatorio():
     colores = [
@@ -550,7 +568,6 @@ with col_main:
     </html>
     """
 
-    # Altura del iframe ajustada para que el vinilo y sombra se vean completamente
     altura_componente = 480 if cancion_actual else 240
     components.html(html_reproductor_completo, height=altura_componente)
 
@@ -609,22 +626,33 @@ with col_main:
                                 st.image(thumb_item, use_container_width=True)
                         with col_btn_song:
                             if st.button(texto_opcion, key=f"song_{v_id_item}_{idx}"):
-                                nueva_cancion = {
-                                    'video_id': v_id_item,
-                                    'title': titulo,
-                                    'artist': artistas,
-                                    'thumbnail': thumb_item,
-                                    'color': obtener_color_aleatorio()
-                                }
-                                agregar_a_playlist(nueva_cancion)
-                                st.toast(f"Añadida a la lista: {titulo}", icon="🎵")
-                                st.rerun()
+                                # VALIDACIÓN DE TIEMPO DE ESPERA (5 MINUTOS)
+                                tiempo_actual = time.time()
+                                tiempo_transcurrido = tiempo_actual - st.session_state.last_added_time
+                                
+                                if tiempo_transcurrido < COOLDOWN_SECONDS:
+                                    tiempo_restante = int(COOLDOWN_SECONDS - tiempo_transcurrido)
+                                    minutos = tiempo_restante // 60
+                                    segundos = tiempo_restante % 60
+                                    st.warning(f"⏳ ¡Espera un poco! Puedes pedir otra canción en {minutos}m {segundos}s.")
+                                else:
+                                    nueva_cancion = {
+                                        'video_id': v_id_item,
+                                        'title': titulo,
+                                        'artist': artistas,
+                                        'thumbnail': thumb_item,
+                                        'color': obtener_color_aleatorio()
+                                    }
+                                    agregar_a_playlist(nueva_cancion)
+                                    st.session_state.last_added_time = tiempo_actual
+                                    st.toast(f"Añadida a la lista: {titulo}", icon="🎵")
+                                    st.rerun()
                                 
             except Exception as e:
                 st.error(f"Error al realizar la búsqueda: {str(e)}")
 
 # ---------------------------------------------------------
-# COLUMNA DERECHA: LISTA DE ESPERA (ESTILO SPOTIFY RED GLASS)
+# COLUMNA DERECHA: LISTA DE ESPERA
 # ---------------------------------------------------------
 with col_queue:
     st.markdown("### 📜 Lista de espera")
@@ -675,3 +703,31 @@ with col_queue:
             st.session_state.playlist = []
             st.session_state.current_index = -1
             st.rerun()
+
+# ---------------------------------------------------------
+# CÓDIGO QR ABAJO DEL TODO (PARA MODO FIESTA)
+# ---------------------------------------------------------
+st.markdown("<br><hr style='border:1px solid rgba(255,34,34,0.2);'><br>", unsafe_allow_html=True)
+
+st.markdown("""
+    <div class='qr-container'>
+        <h2 style='color:#ff2222; margin-bottom:5px; font-weight:800;'>📱 ¡Escanea para poner tu música!</h2>
+        <p style='color:#cccccc; font-size:0.95rem; margin-top:0;'>Apunta con la cámara de tu teléfono para entrar a la app. (1 canción cada 5 minutos)</p>
+    </div>
+""", unsafe_allow_html=True)
+
+col_qr_left, col_qr_center, col_qr_right = st.columns([1, 1.2, 1])
+
+with col_qr_center:
+    # Puedes cambiar esta URL por la URL real donde hospedes la app (ejemplo: Streamlit Cloud o tu dirección IP local)
+    url_app = st.text_input(
+        "Enlace de tu aplicación:", 
+        value="https://share.streamlit.io", 
+        help="Cambia este enlace por la URL pública de tu web para actualizar el QR al instante.",
+        key="app_url_input"
+    )
+    
+    # Generador automático de QR
+    qr_code_api = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={urllib.parse.quote(url_app)}&color=ffffff&bcolor=16161a"
+    
+    st.image(qr_code_api, caption="Escanea el código QR con tu celular", use_container_width=True)
