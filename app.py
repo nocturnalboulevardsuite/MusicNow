@@ -265,10 +265,11 @@ html_reproductor_completo = f"""
     .iframe-container {{
         position: relative;
         width: 100%;
-        padding-top: 56.25%; /* Relación de aspecto 16:9 */
+        padding-top: 56.25%;
         border-radius: 12px;
         overflow: hidden;
         box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        background-color: #000000;
     }}
     .iframe-container iframe {{
         position: absolute;
@@ -277,6 +278,17 @@ html_reproductor_completo = f"""
         width: 100%;
         height: 100%;
         border: 0;
+    }}
+    .external-link {{
+        display: inline-block;
+        margin-top: 10px;
+        font-size: 0.8rem;
+        color: #a0a0a0;
+        text-decoration: none;
+        transition: color 0.2s ease;
+    }}
+    .external-link:hover {{
+        color: #ff2222;
     }}
 </style>
 </head>
@@ -288,15 +300,15 @@ html_reproductor_completo = f"""
 
     {"<div class='player-card'>" if v_id else "<div style='margin-top:10px; color:#777; font-size:0.9rem;'>Selecciona una canción para comenzar</div>"}
     {"<div class='song-details'>▶ " + s_title + " — " + s_artist + "</div>" if v_id else ""}
-    {"<div class='iframe-container'><iframe src='https://www.youtube.com/embed/" + v_id + "?autoplay=1&rel=0' allow='autoplay; encrypted-media' allowfullscreen></iframe></div>" if v_id else ""}
+    {"<div class='iframe-container'><iframe src='https://www.youtube-nocookie.com/embed/" + v_id + "?autoplay=1&rel=0' title='MusicNow Player' allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share' referrerpolicy='strict-origin-when-cross-origin' allowfullscreen></iframe></div>" if v_id else ""}
+    {"<a class='external-link' href='https://www.youtube.com/watch?v=" + v_id + "' target='_blank'>¿No carga el video? Abrir directamente en YouTube ↗</a>" if v_id else ""}
     {"</div>" if v_id else ""}
 
 </body>
 </html>
 """
 
-# Altura ajustada para alojar el reproductor
-altura_componente = 520 if st.session_state.video_id else 220
+altura_componente = 550 if st.session_state.video_id else 220
 components.html(html_reproductor_completo, height=altura_componente)
 
 # ---------------------------------------------------------
