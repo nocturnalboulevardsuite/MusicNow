@@ -355,14 +355,14 @@ html_reproductor_completo = f"""
         cursor: pointer;
     }}
 
-    /* Contenedor invisible pero seguro para evitar bloqueos del navegador */
+    /* SOLUCIÓN AL BLOQUEO DE YOUTUBE: Tamaño normal pero totalmente transparente */
     .offscreen-player {{
         position: absolute;
-        width: 1px;
-        height: 1px;
-        overflow: hidden;
-        opacity: 0.01;
-        z-index: -1;
+        width: 200px;
+        height: 200px;
+        opacity: 0.001; 
+        pointer-events: none;
+        z-index: -99;
     }}
 
     .error-notice {{
@@ -376,7 +376,7 @@ html_reproductor_completo = f"""
 </head>
 <body>
 
-    <!-- Vinilo Animado (Ahora con más espacio para que no se corte) -->
+    <!-- Vinilo Animado -->
     <div id="vinyl-disk" class="vinyl" onclick="togglePlay()">
         <div class="center-label"><div class="center-hole"></div></div>
     </div>
@@ -404,11 +404,11 @@ html_reproductor_completo = f"""
         function onYouTubeIframeAPIReady() {{
             if (!videoId) return;
             player = new YT.Player('yt-player', {{
-                height: '1',
-                width: '1',
+                height: '200', // Tamaño normal para evitar bloqueo por spam de YouTube
+                width: '200',
                 videoId: videoId,
                 playerVars: {{
-                    'autoplay': 0, // Evita que el navegador bloquee el autoplay por políticas estrictas
+                    'autoplay': 0, 
                     'controls': 0,
                     'disablekb': 1,
                     'fs': 0,
