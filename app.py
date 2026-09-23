@@ -158,8 +158,42 @@ st.markdown("""
         color: #ffffff !important;
         font-size: 1.1rem !important;
         font-weight: 700 !important;
-        margin-top: 10px !important;
+        margin-top: 5px !important;
         margin-bottom: 12px !important;
+    }
+
+    /* ESTILO DE LA LISTA DE ESPERA TIPO SPOTIFY ROJO TRANSPARENTE */
+    div[data-testid="stColumn"]:nth-child(2) {
+        background: rgba(255, 34, 34, 0.05) !important;
+        border: 1px solid rgba(255, 34, 34, 0.25) !important;
+        border-radius: 18px !important;
+        padding: 18px 16px !important;
+        box-shadow: 0 8px 32px rgba(255, 0, 0, 0.15), inset 0 0 15px rgba(255, 34, 34, 0.03) !important;
+        backdrop-filter: blur(12px) !important;
+    }
+
+    /* Filas individuales de canciones en la playlist */
+    div[data-testid="stColumn"]:nth-child(2) div[data-testid="stHorizontalBlock"] {
+        background: rgba(22, 22, 26, 0.65) !important;
+        border: 1px solid rgba(255, 255, 255, 0.06) !important;
+        border-radius: 12px !important;
+        padding: 6px 10px !important;
+        margin-bottom: 8px !important;
+        transition: all 0.25s ease !important;
+    }
+
+    div[data-testid="stColumn"]:nth-child(2) div[data-testid="stHorizontalBlock"]:hover {
+        background: rgba(255, 34, 34, 0.15) !important;
+        border-color: rgba(255, 34, 34, 0.35) !important;
+    }
+
+    /* Ajuste de botones pequeños de la lista */
+    div[data-testid="stColumn"]:nth-child(2) div.stButton > button {
+        padding: 4px 6px !important;
+        font-size: 0.8rem !important;
+        border-radius: 8px !important;
+        min-height: 36px !important;
+        height: 36px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -230,7 +264,7 @@ label_style = f"background-image: url('{thumb_url}'); background-size: cover; ba
 # ---------------------------------------------------------
 # ESTRUCTURA EN 2 COLUMNAS (REPRODUCTOR + PLAYLIST)
 # ---------------------------------------------------------
-col_main, col_queue = st.columns([1.6, 1.0], gap="large")
+col_main, col_queue = st.columns([1.55, 1.05], gap="large")
 
 with col_main:
     html_reproductor_completo = f"""
@@ -244,25 +278,28 @@ with col_main:
             display: flex; 
             flex-direction: column; 
             align-items: center; 
-            justify-content: center; 
+            justify-content: flex-start; 
             margin: 0; 
-            padding: 10px 0;
+            padding: 12px 10px;
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
             color: #ffffff;
+            box-sizing: border-box;
         }}
         .vinyl {{
-            width: 175px; height: 175px; border-radius: 50%; position: relative; 
+            width: 170px; height: 170px; border-radius: 50%; position: relative; 
             display: flex; justify-content: center; align-items: center;
             background: radial-gradient(circle at center, transparent 38%, rgba(0,0,0,0.85) 39%, transparent 40%),
                         repeating-radial-gradient(circle at center, #0d0d0d 0px, #0d0d0d 2px, #222 3px, #141414 4px),
                         conic-gradient(from 45deg, #050505, #3d3d3d 22deg, #050505 45deg, #050505 225deg, #3d3d3d 247deg, #050505 270deg);
-            box-shadow: 0 8px 22px rgba(0,0,0,0.9), 0 0 20px {v_color};
+            box-shadow: 0 6px 20px rgba(0,0,0,0.8), 0 0 18px {v_color};
             border: 1px solid #1a1a1a;
             cursor: pointer;
-            margin-bottom: 5px;
+            margin-top: 4px;
+            margin-bottom: 12px;
+            flex-shrink: 0;
         }}
         .center-label {{
-            width: 72px; height: 72px; border-radius: 50%;
+            width: 70px; height: 70px; border-radius: 50%;
             display: flex; justify-content: center; align-items: center; z-index: 2;
             box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 0 8px {v_color};
             transition: all 0.5s ease;
@@ -282,7 +319,6 @@ with col_main:
             border: 1px solid #2a2a30;
             border-radius: 16px;
             padding: 16px 20px;
-            margin-top: 12px;
             box-shadow: 0 0 20px rgba(0,0,0,0.6), 0 0 10px {v_color}40;
             box-sizing: border-box;
         }}
@@ -397,7 +433,7 @@ with col_main:
 
         <div class="offscreen-player"><div id="yt-player"></div></div>
 
-        {"<div class='player-card'>" if v_id else "<div style='margin-top:15px; color:#777; font-size:0.9rem;'>Agrega una canción a la lista para comenzar</div>"}
+        {"<div class='player-card'>" if v_id else "<div style='margin-top:10px; color:#777; font-size:0.9rem;'>Agrega una canción a la lista para comenzar</div>"}
         {"<div class='song-details'>▶ " + s_title + " — " + s_artist + "</div>" if v_id else ""}
         {"<div class='progress-container'><span id='curr-time' class='time-stamp'>0:00</span><input type='range' id='progress' class='progress-bar' value='0' min='0' max='100' oninput='seekToTime(this.value)'><span id='total-dur' class='time-stamp'>0:00</span></div>" if v_id else ""}
         {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-play'></i> <span id='btn-text'>Play</span></button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
@@ -514,7 +550,8 @@ with col_main:
     </html>
     """
 
-    altura_componente = 440 if cancion_actual else 210
+    # Altura del iframe ajustada para que el vinilo y sombra se vean completamente
+    altura_componente = 480 if cancion_actual else 240
     components.html(html_reproductor_completo, height=altura_componente)
 
     # BOTONES SIGUIENTE Y ANTERIOR
@@ -523,7 +560,7 @@ with col_main:
         with col_prev:
             st.button("⏮️ Anterior", on_click=anterior_cancion, disabled=(st.session_state.current_index <= 0), use_container_width=True)
         with col_info:
-            st.markdown(f"<div style='text-align:center; font-size:0.85rem; color:#888;'>{st.session_state.current_index + 1} de {len(st.session_state.playlist)}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align:center; font-size:0.85rem; color:#a0a0a0;'>{st.session_state.current_index + 1} de {len(st.session_state.playlist)}</div>", unsafe_allow_html=True)
         with col_next:
             st.button("Siguiente ⏭️", on_click=siguiente_cancion, disabled=(st.session_state.current_index >= len(st.session_state.playlist) - 1), use_container_width=True)
 
@@ -587,13 +624,20 @@ with col_main:
                 st.error(f"Error al realizar la búsqueda: {str(e)}")
 
 # ---------------------------------------------------------
-# COLUMNA DERECHA: LISTA DE ESPERA (PLAYLIST)
+# COLUMNA DERECHA: LISTA DE ESPERA (ESTILO SPOTIFY RED GLASS)
 # ---------------------------------------------------------
 with col_queue:
     st.markdown("### 📜 Lista de espera")
     
     if not st.session_state.playlist:
-        st.info("La lista está vacía. ¡Busca canciones y agrégalas!")
+        st.markdown(
+            """
+            <div style="background: rgba(255, 34, 34, 0.05); border: 1px dashed rgba(255, 34, 34, 0.3); border-radius: 14px; padding: 25px 15px; text-align: center; color: #aaaaaa; font-size: 0.9rem;">
+                🎵 La lista está vacía.<br>¡Busca canciones y agrégalas para reproducir!
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
     else:
         for idx, item in enumerate(st.session_state.playlist):
             es_actual = (idx == st.session_state.current_index)
@@ -605,12 +649,12 @@ with col_queue:
                     st.image(item['thumbnail'], use_container_width=True)
             
             with c_info:
-                color_texto = "#ff4444" if es_actual else "#e0e0e0"
+                color_texto = "#ff5555" if es_actual else "#f0f0f0"
                 icono = "▶ " if es_actual else ""
                 st.markdown(
                     f"<div style='line-height:1.2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;'>"
                     f"<span style='color:{color_texto}; font-weight:700; font-size:0.86rem;'>{icono}{item['title']}</span><br>"
-                    f"<span style='color:#888888; font-size:0.76rem;'>{item['artist']}</span>"
+                    f"<span style='color:#a0a0a0; font-size:0.76rem;'>{item['artist']}</span>"
                     f"</div>", 
                     unsafe_allow_html=True
                 )
