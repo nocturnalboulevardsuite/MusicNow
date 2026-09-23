@@ -286,7 +286,7 @@ html_reproductor_completo = f"""
         appearance: none;
         height: 5px;
         border-radius: 5px;
-        background: #33333d;
+        background: linear-gradient(to right, {v_color} 0%, #33333d 0%);
         outline: none;
         cursor: pointer;
     }}
@@ -335,29 +335,30 @@ html_reproductor_completo = f"""
     .volume-slider {{
         -webkit-appearance: none;
         appearance: none;
-        width: 85px;
-        height: 4px;
-        border-radius: 4px;
-        background: #33333d;
+        width: 90px;
+        height: 5px;
+        border-radius: 5px;
+        background: linear-gradient(to right, {v_color} 100%, #33333d 100%);
         outline: none;
         cursor: pointer;
     }}
     .volume-slider::-webkit-slider-thumb {{
         -webkit-appearance: none;
         appearance: none;
-        width: 11px;
-        height: 11px;
+        width: 12px;
+        height: 12px;
         border-radius: 50%;
         background: #ffffff;
+        box-shadow: 0 0 6px {v_color};
         cursor: pointer;
     }}
 
-    #yt-hidden-player {{
+    .yt-hidden-container {{
+        width: 0px;
+        height: 0px;
+        overflow: hidden;
         position: absolute;
-        width: 1px;
-        height: 1px;
-        opacity: 0.01;
-        pointer-events: none;
+        visibility: hidden;
     }}
 
     .error-notice {{
@@ -376,17 +377,17 @@ html_reproductor_completo = f"""
         <div class="center-label"><div class="center-hole"></div></div>
     </div>
 
-    <!-- Contenedor iframe invisible para la API de YT -->
-    <div id="yt-hidden-player">
-        <div id="player"></div>
+    <!-- Contenedor iframe oculto con dimensión funcional para evitar bloqueos del navegador -->
+    <div class="yt-hidden-container">
+        {"<iframe id='yt-player-iframe' src='https://www.youtube-nocookie.com/embed/" + v_id + "?enablejsapi=1&autoplay=1&controls=0&rel=0&playsinline=1' width='300' height='200' allow='autoplay; encrypted-media'></iframe>" if v_id else ""}
     </div>
 
     <!-- Tarjeta Interactiva del Reproductor -->
     {"<div class='player-card'>" if v_id else "<div style='margin-top:15px; color:#777; font-size:0.9rem;'>Selecciona una canción para reproducir</div>"}
     {"<div class='song-details'>▶ " + s_title + " — " + s_artist + "</div>" if v_id else ""}
     {"<div class='progress-container'><span id='curr-time' class='time-stamp'>0:00</span><input type='range' id='progress' class='progress-bar' value='0' min='0' max='100' oninput='seekToTime(this.value)'><span id='total-dur' class='time-stamp'>0:00</span></div>" if v_id else ""}
-    {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-pause'></i> Pausa</button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
-    {"<div id='err-msg' class='error-notice'>⚠️ Esta pista no permite reproducción externa. Por favor elige otra canción de las sugerencias.</div>" if v_id else ""}
+    {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-pause'></i> Pausa</button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
+    {"<div id='err-msg' class='error-notice'>⚠️ Esta pista no permite reproducción incrustada. Elige otra canción.</div>" if v_id else ""}
     {"</div>" if v_id else ""}
 
     <script src="https://www.youtube.com/iframe_api"></script>
@@ -394,19 +395,11 @@ html_reproductor_completo = f"""
         var player;
         var isPlaying = false;
         var videoId = "{v_id}";
+        var vColor = "{v_color}";
 
         function onYouTubeIframeAPIReady() {{
             if (!videoId) return;
-            player = new YT.Player('player', {{
-                height: '1',
-                width: '1',
-                videoId: videoId,
-                playerVars: {{
-                    'autoplay': 1,
-                    'controls': 0,
-                    'modestbranding': 1,
-                    'rel': 0
-                }},
+            player = new YT.Player('yt-player-iframe', {{
                 events: {{
                     'onReady': onPlayerReady,
                     'onStateChange': onPlayerStateChange,
@@ -451,6 +444,10 @@ html_reproductor_completo = f"""
             if (player && player.setVolume) {{
                 player.setVolume(val);
             }}
+            var volSlider = document.getElementById('vol-slider');
+            if (volSlider) {{
+                volSlider.style.background = 'linear-gradient(to right, ' + vColor + ' ' + val + '%, #33333d ' + val + '%)';
+            }}
         }}
 
         function seekToTime(val) {{
@@ -458,6 +455,10 @@ html_reproductor_completo = f"""
                 var dur = player.getDuration();
                 var target = (val / 100) * dur;
                 player.seekTo(target, true);
+                var prog = document.getElementById('progress');
+                if (prog) {{
+                    prog.style.background = 'linear-gradient(to right, ' + vColor + ' ' + val + '%, #33333d ' + val + '%)';
+                }}
             }}
         }}
 
@@ -474,12 +475,20 @@ html_reproductor_completo = f"""
                     var cur = player.getCurrentTime();
                     var dur = player.getDuration();
                     if (dur > 0) {{
-                        document.getElementById('curr-time').innerText = formatTime(cur);
-                        document.getElementById('total-dur').innerText = formatTime(dur);
-                        document.getElementById('progress').value = (cur / dur) * 100;
+                        var pct = (cur / dur) * 100;
+                        var currElem = document.getElementById('curr-time');
+                        var totalElem = document.getElementById('total-dur');
+                        var progElem = document.getElementById('progress');
+
+                        if (currElem) currElem.innerText = formatTime(cur);
+                        if (totalElem) totalElem.innerText = formatTime(dur);
+                        if (progElem) {{
+                            progElem.value = pct;
+                            progElem.style.background = 'linear-gradient(to right, ' + vColor + ' ' + pct + '%, #33333d ' + pct + '%)';
+                        }}
                     }}
                 }}
-            }}, 400);
+            }}, 300);
         }}
 
         function onPlayerError(e) {{
