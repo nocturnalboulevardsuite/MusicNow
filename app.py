@@ -13,7 +13,7 @@ ytmusic = get_ytmusic()
 # Configuración de la página
 st.set_page_config(page_title="MusicNow", layout="centered")
 
-# CSS Global con tipografía Inter, Ola RGBIC y Buscador Cápsula con Lupa Integrada
+# CSS Global con tipografía Inter, Ola RGBIC y Buscador Unificado con Lupa Integrada
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap');
@@ -74,7 +74,7 @@ st.markdown("""
         100% { background-position: 0% 0%; }
     }
 
-    /* OCULTAR COMPLETAMENTE 'Press Enter to apply' Y CUALQUIER TEXTO DE INSTRUCCIÓN */
+    /* OCULTAR COMPLETAMENTE 'Press Enter to apply' Y TEXTOS DE INSTRUCCIÓN */
     div[data-testid="stInputInstructions"], 
     small[data-testid="stInputInstructions"],
     .stInputInstructions,
@@ -86,35 +86,28 @@ st.markdown("""
         width: 0 !important;
     }
 
-    /* CONTENEDOR EN CÁPSULA DEL BUSCADOR */
-    .search-wrapper {
-        position: relative !important;
-        width: 100% !important;
-        margin-top: 10px !important;
-        margin-bottom: 20px !important;
-    }
-
-    .search-wrapper div[data-testid="stTextInput"] {
-        width: 100% !important;
-    }
-
-    .search-wrapper input {
+    /* DISEÑO DE LA BARRA DE BÚSQUEDA EN CÁPSULA */
+    div[data-testid="stTextInput"] > div > div {
         background-color: #16161a !important;
-        border-radius: 50px !important; /* Forma redondeada de cápsula perfecta */
+        border-radius: 50px !important; /* Cápsula redondeada */
         border: 2px solid #ff2222 !important;
+        box-shadow: 0 0 15px rgba(255, 34, 34, 0.2) !important;
+        transition: all 0.3s ease !important;
+        height: 52px !important;
+    }
+
+    div[data-testid="stTextInput"] > div > div:focus-within {
+        border-color: #ff5555 !important;
+        box-shadow: 0 0 20px rgba(255, 34, 34, 0.45) !important;
+    }
+
+    div[data-testid="stTextInput"] input {
+        background-color: transparent !important;
         color: #ffffff !important;
         font-family: 'Inter', sans-serif !important;
         font-size: 1rem !important;
-        padding: 12px 55px 12px 22px !important; /* Espacio a la derecha para la lupa */
-        height: 52px !important;
-        box-shadow: 0 0 15px rgba(255, 34, 34, 0.25) !important;
-        transition: all 0.3s ease !important;
-    }
-
-    .search-wrapper input:focus {
-        border-color: #ff5555 !important;
-        box-shadow: 0 0 20px rgba(255, 34, 34, 0.45) !important;
-        outline: none !important;
+        padding: 12px 55px 12px 22px !important; /* Espacio reservado para la lupa a la derecha */
+        height: 48px !important;
     }
 
     div[data-baseweb="input"] {
@@ -122,37 +115,40 @@ st.markdown("""
         border: none !important;
     }
 
-    /* BOTÓN CIRCULAR CON LUPA EN LA PUNTA INTERIOR DERECHA */
-    .search-btn-icon {
-        position: absolute !important;
-        right: 7px !important;
-        top: 50% !important;
-        transform: translateY(-50%) !important;
-        z-index: 10 !important;
-    }
-
-    .search-btn-icon .stButton > button {
-        background-color: #7a1d1d !important; /* Rojo opaco */
-        color: #ffffff !important;
-        border-radius: 50% !important; /* Botón circular */
-        width: 38px !important;
-        height: 38px !important;
-        min-width: 38px !important;
-        padding: 0 !important;
+    /* POSICIONAR EL BOTÓN DE BÚSQUEDA EXACTAMENTE DENTRO DE LA PUNTA DERECHA DE LA BARRA */
+    div[data-testid="element-container"]:has(div[data-testid="stTextInput"]) + div[data-testid="element-container"] {
+        margin-top: -46px !important;
+        margin-bottom: 22px !important;
         display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        border: 1px solid #a82424 !important;
-        font-size: 1.1rem !important;
-        transition: all 0.2s ease !important;
-        box-shadow: none !important;
-        cursor: pointer !important;
+        justify-content: flex-end !important;
+        padding-right: 6px !important;
+        position: relative !important;
+        z-index: 100 !important;
     }
 
-    .search-btn-icon .stButton > button:hover {
-        background-color: #ff2222 !important;
-        border-color: #ff5555 !important;
-        box-shadow: 0 0 10px rgba(255, 34, 34, 0.5) !important;
+    /* ESTILO DEL BOTÓN CON ÍCONO VECTORIAL DE LUPA BLANCA Y FONDO ROJO OPACO */
+    div[data-testid="element-container"]:has(div[data-testid="stTextInput"]) + div[data-testid="element-container"] button {
+        background-color: #821c1c !important; /* Rojo opaco */
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23ffffff' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' /%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: center !important;
+        background-size: 18px 18px !important;
+        color: transparent !important; /* Ocultar texto */
+        border-radius: 50% !important; /* Botón circular */
+        width: 40px !important;
+        height: 40px !important;
+        min-width: 40px !important;
+        border: 1px solid #a82424 !important;
+        cursor: pointer !important;
+        box-shadow: none !important;
+        transition: all 0.2s ease !important;
+        padding: 0 !important;
+    }
+
+    div[data-testid="element-container"]:has(div[data-testid="stTextInput"]) + div[data-testid="element-container"] button:hover {
+        background-color: #a82424 !important;
+        border-color: #ff2222 !important;
+        box-shadow: 0 0 12px rgba(255, 34, 34, 0.5) !important;
         transform: scale(1.05) !important;
     }
 
@@ -313,18 +309,11 @@ html_vinilo = f"""
 altura_componente = 340 if st.session_state.video_id else 200
 components.html(html_vinilo, height=altura_componente)
 
-# BARRA DE BÚSQUEDA EN CÁPSULA CON LUPA INTEGRADA DENTRO
-st.markdown('<div class="search-wrapper">', unsafe_allow_html=True)
-
+# BARRA DE BÚSQUEDA INTEGRADA
 query_input = st.text_input("", placeholder="Buscar canción, artista o género...", label_visibility="collapsed")
+btn_buscar = st.button("", key="btn_buscar_lupa")
 
-st.markdown('<div class="search-btn-icon">', unsafe_allow_html=True)
-btn_buscar = st.button("🔍", key="btn_buscar_lupa")
-st.markdown('</div>', unsafe_allow_html=True)
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-# Actualizar término de búsqueda al hacer clic en la Lupa o presionar Enter
+# Actualizar término de búsqueda al hacer clic en la lupa o presionar Enter
 if (btn_buscar or query_input) and query_input:
     st.session_state.current_query = query_input
 
