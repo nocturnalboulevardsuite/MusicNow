@@ -13,7 +13,7 @@ ytmusic = get_ytmusic()
 # Configuración de la página
 st.set_page_config(page_title="MusicNow", layout="centered")
 
-# CSS Global estilizado y con eliminación total de "Press Enter to apply"
+# CSS Global estilizado con eliminación total de "Press Enter to apply" y barra unificada
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap');
@@ -60,7 +60,7 @@ st.markdown("""
         100% { background-position: 0% 0%; }
     }
 
-    /* ELIMINACIÓN TOTAL Y DEFICITIVA DE "PRESS ENTER TO APPLY" */
+    /* ELIMINACIÓN DEFICITIVA DE "PRESS ENTER TO APPLY" */
     div[data-testid="InputInstructions"], 
     div[data-testid="stInputInstructions"],
     [data-testid="stInputInstructions"],
@@ -83,23 +83,34 @@ st.markdown("""
         box-shadow: none !important;
     }
 
-    /* DISEÑO DE LA BARRA DE BÚSQUEDA LARGA Y EXTENDIDA */
+    /* ========================================================= */
+    /* BARRA DE BÚSQUEDA Y BOTÓN UNIFICADOS Y CENTRADOS (680px)  */
+    /* ========================================================= */
+    div[data-testid="stForm"] {
+        background-color: #16161a !important;
+        border: 2px solid #ff2222 !important;
+        border-radius: 14px !important;
+        padding: 4px 8px !important;
+        box-shadow: 0 0 12px rgba(255, 34, 34, 0.25) !important;
+        transition: all 0.3s ease !important;
+        width: 100% !important;
+    }
+
+    div[data-testid="stForm"]:focus-within {
+        border-color: #ff5555 !important;
+        box-shadow: 0 0 18px rgba(255, 34, 34, 0.45) !important;
+    }
+
+    /* ELIMINAR BORDES INTERNOS DEL INPUT */
     div[data-testid="stTextInput"] {
         margin-bottom: 0px !important;
     }
 
     div[data-testid="stTextInput"] > div > div {
-        background-color: #16161a !important;
-        border-radius: 12px !important;
-        border: 2px solid #ff2222 !important;
-        box-shadow: 0 0 12px rgba(255, 34, 34, 0.2) !important;
-        transition: all 0.3s ease !important;
-        height: 46px !important;
-    }
-
-    div[data-testid="stTextInput"] > div > div:focus-within {
-        border-color: #ff5555 !important;
-        box-shadow: 0 0 18px rgba(255, 34, 34, 0.4) !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        height: 42px !important;
     }
 
     div[data-testid="stTextInput"] input {
@@ -107,29 +118,26 @@ st.markdown("""
         color: #ffffff !important;
         font-family: 'Inter', sans-serif !important;
         font-size: 0.95rem !important;
-        padding: 10px 16px !important;
-        height: 42px !important;
+        padding: 8px 12px !important;
+        height: 40px !important;
     }
 
-    /* BOTÓN DE BÚSQUEDA COMPACTO A LA IZQUIERDA */
-    div[data-testid="column"]:nth-child(1) button {
-        height: 46px !important;
-        border-radius: 12px !important;
-        background-color: #1a1618 !important;
-        border: 1px solid #ff2222 !important;
+    /* ESTILO DEL BOTÓN DE LA IZQUIERDA */
+    div[data-testid="stForm"] button[data-testid="stFormSubmitButton"] {
+        height: 40px !important;
+        border-radius: 10px !important;
+        background-color: #ff2222 !important;
+        border: none !important;
         color: #ffffff !important;
-        font-weight: 600 !important;
+        font-weight: 700 !important;
         font-size: 0.9rem !important;
         transition: all 0.2s ease !important;
-        box-shadow: 0 0 8px rgba(255, 34, 34, 0.15) !important;
-        padding: 0px 12px !important;
+        box-shadow: 0 0 8px rgba(255, 34, 34, 0.3) !important;
     }
 
-    div[data-testid="column"]:nth-child(1) button:hover {
-        background-color: #ff2222 !important;
-        border-color: #ff2222 !important;
-        color: #ffffff !important;
-        box-shadow: 0 0 14px rgba(255, 34, 34, 0.5) !important;
+    div[data-testid="stForm"] button[data-testid="stFormSubmitButton"]:hover {
+        background-color: #ff4444 !important;
+        box-shadow: 0 0 14px rgba(255, 34, 34, 0.6) !important;
     }
 
     /* BOTONES DE RESULTADOS */
@@ -254,15 +262,14 @@ altura_componente = 340 if st.session_state.video_id else 200
 components.html(html_vinilo, height=altura_componente)
 
 # ---------------------------------------------------------
-# BLOQUE DE BÚSQUEDA ALINEADO COMPLETO (ANCHO TOTAL 680px)
+# FORMULARIO DE BÚSQUEDA CENTRADO Y UNIFICADO
 # ---------------------------------------------------------
-col_btn, col_input = st.columns([0.8, 4.2], vertical_alignment="bottom")
-
-with col_btn:
-    btn_buscar = st.button("Buscar", use_container_width=True)
-
-with col_input:
-    query_input = st.text_input("Búsqueda", placeholder="Buscar canción, artista o género...", label_visibility="collapsed")
+with st.form(key="search_form", border=False):
+    col_btn, col_input = st.columns([0.18, 0.82], vertical_alignment="center")
+    with col_btn:
+        btn_buscar = st.form_submit_button("Buscar", use_container_width=True)
+    with col_input:
+        query_input = st.text_input("Búsqueda", placeholder="Buscar canción, artista o género...", label_visibility="collapsed")
 
 # Acción de Búsqueda
 if (btn_buscar or query_input) and query_input:
