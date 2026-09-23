@@ -719,7 +719,6 @@ st.markdown("""
 col_qr_left, col_qr_center, col_qr_right = st.columns([1, 1.2, 1])
 
 with col_qr_center:
-    # Puedes cambiar esta URL por la URL real donde hospedes la app (ejemplo: Streamlit Cloud o tu dirección IP local)
     url_app = st.text_input(
         "Enlace de tu aplicación:", 
         value="https://share.streamlit.io", 
@@ -727,7 +726,16 @@ with col_qr_center:
         key="app_url_input"
     )
     
-    # Generador automático de QR
-    qr_code_api = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={urllib.parse.quote(url_app)}&color=ffffff&bcolor=16161a"
+    # Generador de QR corregido (negro sobre blanco de alta definición)
+    qr_code_api = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(url_app)}"
     
-    st.image(qr_code_api, caption="Escanea el código QR con tu celular", use_container_width=True)
+    # Renderizado envuelto en contenedor blanco para garantizar legibilidad en dispositivos y cámaras
+    st.markdown(
+        f"""
+        <div style="background-color: #ffffff; padding: 16px; border-radius: 16px; display: flex; justify-content: center; align-items: center; box-shadow: 0 0 20px rgba(255, 34, 34, 0.2); margin-top: 10px;">
+            <img src="{qr_code_api}" style="width: 100%; max-width: 240px; height: auto; border-radius: 4px;">
+        </div>
+        <p style="text-align: center; color: #a0a0a0; font-size: 0.85rem; margin-top: 10px;">Escanea el código QR con tu celular</p>
+        """,
+        unsafe_allow_html=True
+    )
