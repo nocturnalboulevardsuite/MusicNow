@@ -6,14 +6,17 @@ import hashlib
 # Inicializar buscador de YouTube Music
 @st.cache_resource
 def get_ytmusic():
-    return YTMusic()
+    try:
+        return YTMusic()
+    except Exception:
+        return None
 
 ytmusic = get_ytmusic()
 
 # Configuración de la página
 st.set_page_config(page_title="MusicNow", layout="centered")
 
-# CSS Global estilizado con eliminación total de "Press Enter to apply" y barra unificada
+# CSS Global estilizado
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap');
@@ -60,7 +63,7 @@ st.markdown("""
         100% { background-position: 0% 0%; }
     }
 
-    /* ELIMINACIÓN DEFICITIVA DE "PRESS ENTER TO APPLY" */
+    /* ELIMINACIÓN DE INSTRUCCIONES "PRESS ENTER TO APPLY" */
     div[data-testid="InputInstructions"], 
     div[data-testid="stInputInstructions"],
     [data-testid="stInputInstructions"],
@@ -83,9 +86,7 @@ st.markdown("""
         box-shadow: none !important;
     }
 
-    /* ========================================================= */
-    /* BARRA DE BÚSQUEDA Y BOTÓN UNIFICADOS Y CENTRADOS (680px)  */
-    /* ========================================================= */
+    /* BARRA DE BÚSQUEDA Y BOTÓN UNIFICADOS */
     div[data-testid="stForm"] {
         background-color: #16161a !important;
         border: 2px solid #ff2222 !important;
@@ -101,7 +102,6 @@ st.markdown("""
         box-shadow: 0 0 18px rgba(255, 34, 34, 0.45) !important;
     }
 
-    /* ELIMINAR BORDES INTERNOS DEL INPUT */
     div[data-testid="stTextInput"] {
         margin-bottom: 0px !important;
     }
@@ -122,7 +122,6 @@ st.markdown("""
         height: 40px !important;
     }
 
-    /* ESTILO DEL BOTÓN DE LA IZQUIERDA */
     div[data-testid="stForm"] button[data-testid="stFormSubmitButton"] {
         height: 40px !important;
         border-radius: 10px !important;
@@ -140,20 +139,20 @@ st.markdown("""
         box-shadow: 0 0 14px rgba(255, 34, 34, 0.6) !important;
     }
 
-    /* BOTONES DE RESULTADOS */
+    /* BOTONES DE SUGERENCIAS DE CANCIONES */
     div.stButton > button {
         background-color: #16161a; 
         color: #e0e0e0; 
         font-family: 'Inter', sans-serif;
-        font-size: 0.95rem;
+        font-size: 0.92rem;
         font-weight: 500;
         border: 1px solid #2a2a30; 
         border-radius: 12px; 
         width: 100%; 
         text-align: left; 
         transition: all 0.2s ease;
-        padding: 10px 16px;
-        margin-bottom: 5px;
+        padding: 12px 16px;
+        margin-bottom: 6px;
     }
     
     div.stButton > button:hover { 
@@ -168,7 +167,8 @@ st.markdown("""
         color: #ffffff !important;
         font-size: 1.1rem !important;
         font-weight: 700 !important;
-        margin-top: 20px !important;
+        margin-top: 22px !important;
+        margin-bottom: 12px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -195,7 +195,7 @@ def obtener_color_artista(artista):
     hash_object = hashlib.md5(artista.encode())
     return '#' + hash_object.hexdigest()[:6]
 
-# Reproductor
+# Componente iframe de Reproducción
 reproductor_html = ""
 clase_animacion = ""
 
@@ -203,15 +203,15 @@ if st.session_state.video_id:
     clase_animacion = "spin"
     reproductor_html = f"""
     <iframe class="yt-player" width="280" height="75" 
-        src="https://www.youtube.com/embed/{st.session_state.video_id}?autoplay=1&color=red" 
-        frameborder="0" allow="autoplay; encrypted-media">
+        src="https://www.youtube.com/embed/{st.session_state.video_id}?autoplay=1&enablejsapi=1" 
+        frameborder="0" allow="autoplay; encrypted-media" allowfullscreen>
     </iframe>
     <p style='color: #dddddd; font-family: "Inter", sans-serif; text-align: center; margin-top: 12px; font-size: 0.95rem; font-weight: 600;'>
-        Reproduciendo: {st.session_state.song_title}
+        ▶ Reproduciendo: {st.session_state.song_title} — {st.session_state.artist_name}
     </p>
     """
 
-# Vinilo HTML
+# Componente HTML del Vinilo Animado
 html_vinilo = f"""
 <!DOCTYPE html>
 <html>
@@ -257,12 +257,11 @@ html_vinilo = f"""
 </html>
 """
 
-# Renderizar vinilo
 altura_componente = 340 if st.session_state.video_id else 200
 components.html(html_vinilo, height=altura_componente)
 
 # ---------------------------------------------------------
-# FORMULARIO DE BÚSQUEDA CENTRADO Y UNIFICADO
+# FORMULARIO DE BÚSQUEDA
 # ---------------------------------------------------------
 with st.form(key="search_form", border=False):
     col_btn, col_input = st.columns([0.18, 0.82], vertical_alignment="center")
@@ -271,27 +270,44 @@ with st.form(key="search_form", border=False):
     with col_input:
         query_input = st.text_input("Búsqueda", placeholder="Buscar canción, artista o género...", label_visibility="collapsed")
 
-# Acción de Búsqueda
-if (btn_buscar or query_input) and query_input:
-    st.session_state.current_query = query_input
+# Al hacer submit en el formulario se actualiza la búsqueda actual
+if btn_buscar and query_input.strip():
+    st.session_state.current_query = query_input.strip()
 
-# Resultados
+# ---------------------------------------------------------
+# RENDERIZADO DE SUGERENCIAS Y REPRODUCCIÓN
+# ---------------------------------------------------------
 if st.session_state.current_query:
-    st.write("### Sugerencias")
-    try:
-        resultados = ytmusic.search(st.session_state.current_query, filter="songs", limit=10)
-        
-        for song in resultados:
-            titulo = song.get('title', 'Desconocido')
-            artistas = ", ".join([a['name'] for a in song.get('artists', [])])
-            texto_boton = f"{titulo} - {artistas}"
-            video_id = song.get('videoId')
+    st.write(f"### Sugerencias")
+    
+    if ytmusic is None:
+        st.error("Error al conectar con YouTube Music. Verifica que `ytmusicapi` esté instalado.")
+    else:
+        try:
+            resultados = ytmusic.search(st.session_state.current_query, filter="songs", limit=8)
             
-            if video_id and st.button(texto_boton, key=video_id):
-                st.session_state.video_id = video_id
-                st.session_state.song_title = titulo
-                st.session_state.artist_name = artistas
-                st.session_state.vinyl_color = obtener_color_artista(artistas)
-                st.rerun()
-    except Exception as e:
-        st.error("No se encontraron resultados. Intenta de nuevo.")
+            if not resultados:
+                st.info("No se encontraron resultados para tu búsqueda.")
+            else:
+                for idx, song in enumerate(resultados):
+                    v_id = song.get('videoId')
+                    if not v_id:
+                        continue
+                    
+                    titulo = song.get('title', 'Canción desconocida')
+                    artistas_list = song.get('artists', [])
+                    artistas = ", ".join([a['name'] for a in artistas_list if 'name' in a]) or "Artista desconocido"
+                    duracion = song.get('duration', '')
+                    
+                    texto_opcion = f"🎵  {titulo} — {artistas}" + (f" ({duracion})" if duracion else "")
+                    
+                    # Al hacer clic en una sugerencia, se actualiza la canción y se vuelve a renderizar
+                    if st.button(texto_opcion, key=f"song_{v_id}_{idx}"):
+                        st.session_state.video_id = v_id
+                        st.session_state.song_title = titulo
+                        st.session_state.artist_name = artistas
+                        st.session_state.vinyl_color = obtener_color_artista(artistas)
+                        st.rerun()
+                        
+        except Exception as e:
+            st.error(f"Error al obtener sugerencias: {str(e)}")
