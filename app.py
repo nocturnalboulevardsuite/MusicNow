@@ -266,23 +266,23 @@ html_reproductor_completo = f"""
         text-overflow: ellipsis;
         color: #f0f0f0;
     }}
-    
-    /* REPRODUCTOR VISIBLE DE YOUTUBE */
+
+    /* CONTENEDOR DEL REPRODUCTOR VISIBLE */
     .video-box {{
         width: 100%;
-        height: 160px;
+        height: 170px;
         border-radius: 12px;
         overflow: hidden;
         margin-bottom: 14px;
         border: 1px solid #2a2a30;
-        box-shadow: 0 0 10px {v_color}30;
+        box-shadow: 0 0 12px {v_color}30;
     }}
     .video-box iframe {{
         width: 100%;
         height: 100%;
         border: none;
     }}
-
+    
     /* BARRA DE PROGRESO Y TIEMPO */
     .progress-container {{
         display: flex;
@@ -381,9 +381,9 @@ html_reproductor_completo = f"""
     {"<div class='player-card'>" if v_id else "<div style='margin-top:15px; color:#777; font-size:0.9rem;'>Selecciona una canción para reproducir</div>"}
     {"<div class='song-details'>▶ " + s_title + " — " + s_artist + "</div>" if v_id else ""}
     
-    <!-- Video de YouTube visible e interactivo -->
+    <!-- Reproductor de YouTube Integrado -->
     {f'<div class="video-box"><iframe id="yt-player-iframe" src="https://www.youtube-nocookie.com/embed/{v_id}?enablejsapi=1&autoplay=1&rel=0&playsinline=1" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>' if v_id else ''}
-    
+
     {"<div class='progress-container'><span id='curr-time' class='time-stamp'>0:00</span><input type='range' id='progress' class='progress-bar' value='0' min='0' max='100' oninput='seekToTime(this.value)'><span id='total-dur' class='time-stamp'>0:00</span></div>" if v_id else ""}
     {"<div class='controls-row'><button id='play-btn' class='btn-play' onclick='togglePlay()'><i id='play-icon' class='fas fa-pause'></i> Pausa</button><div class='volume-box'><i class='fas fa-volume-up'></i><input type='range' id='vol-slider' class='volume-slider' min='0' max='100' value='100' oninput='changeVolume(this.value)'></div></div>" if v_id else ""}
     {"</div>" if v_id else ""}
@@ -492,7 +492,7 @@ html_reproductor_completo = f"""
 </html>
 """
 
-altura_componente = 520 if st.session_state.video_id else 210
+altura_componente = 530 if st.session_state.video_id else 210
 components.html(html_reproductor_completo, height=altura_componente)
 
 # ---------------------------------------------------------
