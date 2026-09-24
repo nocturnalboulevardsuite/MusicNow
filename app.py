@@ -233,7 +233,7 @@ if 'current_query' not in st.session_state:
 if 'last_added_time' not in st.session_state:
     st.session_state.last_added_time = 0
 
-COOLDOWN_SECONDS = 300  # 5 minutos de espera entre cada canción agregada
+COOLDOWN_SECONDS = 120  # 2 minutos de espera entre cada canción agregada
 
 def obtener_color_aleatorio():
     colores = [
