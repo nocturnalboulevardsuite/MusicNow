@@ -601,9 +601,9 @@ with col_main:
             st.error("No se pudo conectar a YouTube Music.")
         else:
             try:
-                resultados = ytmusic.search(st.session_state.current_query, filter="videos", limit=6)
+                resultados = ytmusic.search(st.session_state.current_query, filter="videos", limit=4)
                 if not resultados:
-                    resultados = ytmusic.search(st.session_state.current_query, limit=6)
+                    resultados = ytmusic.search(st.session_state.current_query, limit=4)
                 
                 if not resultados:
                     st.info("No se encontraron resultados para tu búsqueda.")
