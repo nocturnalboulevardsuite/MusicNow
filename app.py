@@ -601,10 +601,13 @@ with col_main:
             st.error("No se pudo conectar a YouTube Music.")
         else:
             try:
-                # CAMBIADO A LIMIT=5 PARA MOSTRAR MÁXIMO 5 RESULTADOS
+                # Se establece limit=5 en la API y se recorta explícitamente a 5 resultados
                 resultados = ytmusic.search(st.session_state.current_query, filter="videos", limit=5)
                 if not resultados:
                     resultados = ytmusic.search(st.session_state.current_query, limit=5)
+                
+                # RECORTE ESTRICTO A MÁXIMO 5 SUGERENCIAS
+                resultados = resultados[:5] if resultados else []
                 
                 if not resultados:
                     st.info("No se encontraron resultados para tu búsqueda.")
