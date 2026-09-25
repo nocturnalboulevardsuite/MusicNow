@@ -632,7 +632,7 @@ with col_main:
                                 st.image(thumb_item, use_container_width=True)
                         with col_btn_song:
                             if st.button(texto_opcion, key=f"song_{v_id_item}_{idx}"):
-                                # VALIDACIÓN DE TIEMPO DE ESPERA (5 MINUTOS)
+                                # VALIDACIÓN DE TIEMPO DE ESPERA (2 MINUTOS)
                                 tiempo_actual = time.time()
                                 tiempo_transcurrido = tiempo_actual - st.session_state.last_added_time
                                 
