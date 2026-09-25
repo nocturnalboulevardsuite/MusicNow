@@ -18,6 +18,20 @@ ytmusic = get_ytmusic()
 # Configuración de la página en formato ancho (wide)
 st.set_page_config(page_title="MusicNow - Party Mode", layout="wide")
 
+# ---------------------------------------------------------
+# SALA COMPARTIDA GLOBALMENTE ENTRE TODOS LOS DISPOSITIVOS
+# ---------------------------------------------------------
+class SharedPartyRoom:
+    def __init__(self):
+        self.playlist = []
+        self.current_index = -1
+
+@st.cache_resource
+def get_party_room():
+    return SharedPartyRoom()
+
+room = get_party_room()
+
 # CSS Global
 st.markdown("""
     <style>
@@ -220,13 +234,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Estado global de la cola de reproducción y tiempo de espera
-if 'playlist' not in st.session_state:
-    st.session_state.playlist = []
-
-if 'current_index' not in st.session_state:
-    st.session_state.current_index = -1
-
+# Estado individual del usuario (búsqueda y cooldown por teléfono)
 if 'current_query' not in st.session_state:
     st.session_state.current_query = ""
 
@@ -244,34 +252,34 @@ def obtener_color_aleatorio():
     return random.choice(colores)
 
 def reproducir_indice(idx):
-    if 0 <= idx < len(st.session_state.playlist):
-        st.session_state.current_index = idx
+    if 0 <= idx < len(room.playlist):
+        room.current_index = idx
 
 def siguiente_cancion():
-    if st.session_state.playlist and st.session_state.current_index < len(st.session_state.playlist) - 1:
-        st.session_state.current_index += 1
+    if room.playlist and room.current_index < len(room.playlist) - 1:
+        room.current_index += 1
 
 def anterior_cancion():
-    if st.session_state.playlist and st.session_state.current_index > 0:
-        st.session_state.current_index -= 1
+    if room.playlist and room.current_index > 0:
+        room.current_index -= 1
 
 def agregar_a_playlist(song):
-    st.session_state.playlist.append(song)
-    if st.session_state.current_index == -1:
-        st.session_state.current_index = 0
+    room.playlist.append(song)
+    if room.current_index == -1:
+        room.current_index = 0
 
 def eliminar_de_playlist(idx):
-    if 0 <= idx < len(st.session_state.playlist):
-        st.session_state.playlist.pop(idx)
-        if len(st.session_state.playlist) == 0:
-            st.session_state.current_index = -1
-        elif st.session_state.current_index >= len(st.session_state.playlist):
-            st.session_state.current_index = len(st.session_state.playlist) - 1
+    if 0 <= idx < len(room.playlist):
+        room.playlist.pop(idx)
+        if len(room.playlist) == 0:
+            room.current_index = -1
+        elif room.current_index >= len(room.playlist):
+            room.current_index = len(room.playlist) - 1
 
 # Obtener canción actual
 cancion_actual = None
-if 0 <= st.session_state.current_index < len(st.session_state.playlist):
-    cancion_actual = st.session_state.playlist[st.session_state.current_index]
+if 0 <= room.current_index < len(room.playlist):
+    cancion_actual = room.playlist[room.current_index]
 
 v_id = cancion_actual['video_id'] if cancion_actual else ""
 s_title = cancion_actual['title'] if cancion_actual else ""
@@ -573,7 +581,7 @@ with col_main:
     altura_componente = 480 if cancion_actual else 240
     components.html(html_reproductor_completo, height=altura_componente)
 
-    # FORMULARIO DE BÚSQUEDA (Ubicado arriba de la navegación)
+    # FORMULARIO DE BÚSQUEDA
     with st.form(key="search_form", border=False):
         col_btn, col_input = st.columns([0.22, 0.78], vertical_alignment="center")
         with col_btn:
@@ -584,15 +592,15 @@ with col_main:
     if btn_buscar and query_input.strip():
         st.session_state.current_query = query_input.strip()
 
-    # BOTONES SIGUIENTE Y ANTERIOR (Ubicados debajo del buscador)
-    if st.session_state.playlist:
+    # BOTONES SIGUIENTE Y ANTERIOR
+    if room.playlist:
         col_prev, col_info, col_next = st.columns([0.35, 0.3, 0.35], vertical_alignment="center")
         with col_prev:
-            st.button("⏮️ Anterior", on_click=anterior_cancion, disabled=(st.session_state.current_index <= 0), use_container_width=True)
+            st.button("⏮️ Anterior", on_click=anterior_cancion, disabled=(room.current_index <= 0), use_container_width=True)
         with col_info:
-            st.markdown(f"<div style='text-align:center; font-size:0.85rem; color:#a0a0a0;'>{st.session_state.current_index + 1} de {len(st.session_state.playlist)}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align:center; font-size:0.85rem; color:#a0a0a0;'>{room.current_index + 1} de {len(room.playlist)}</div>", unsafe_allow_html=True)
         with col_next:
-            st.button("Siguiente ⏭️", on_click=siguiente_cancion, disabled=(st.session_state.current_index >= len(st.session_state.playlist) - 1), use_container_width=True)
+            st.button("Siguiente ⏭️", on_click=siguiente_cancion, disabled=(room.current_index >= len(room.playlist) - 1), use_container_width=True)
 
     # RESULTADOS DE BÚSQUEDA
     if st.session_state.current_query:
@@ -601,12 +609,10 @@ with col_main:
             st.error("No se pudo conectar a YouTube Music.")
         else:
             try:
-                # Se establece limit=5 en la API y se recorta explícitamente a 5 resultados
                 resultados = ytmusic.search(st.session_state.current_query, filter="videos", limit=5)
                 if not resultados:
                     resultados = ytmusic.search(st.session_state.current_query, limit=5)
                 
-                # RECORTE ESTRICTO A MÁXIMO 5 SUGERENCIAS
                 resultados = resultados[:5] if resultados else []
                 
                 if not resultados:
@@ -632,7 +638,6 @@ with col_main:
                                 st.image(thumb_item, use_container_width=True)
                         with col_btn_song:
                             if st.button(texto_opcion, key=f"song_{v_id_item}_{idx}"):
-                                # VALIDACIÓN DE TIEMPO DE ESPERA (2 MINUTOS)
                                 tiempo_actual = time.time()
                                 tiempo_transcurrido = tiempo_actual - st.session_state.last_added_time
                                 
@@ -658,12 +663,12 @@ with col_main:
                 st.error(f"Error al realizar la búsqueda: {str(e)}")
 
 # ---------------------------------------------------------
-# COLUMNA DERECHA: LISTA DE ESPERA
+# COLUMNA DERECHA: LISTA DE ESPERA (COMPARTIDA)
 # ---------------------------------------------------------
 with col_queue:
     st.markdown("### Lista de espera")
     
-    if not st.session_state.playlist:
+    if not room.playlist:
         st.markdown(
             """
             <div style="background: rgba(255, 34, 34, 0.05); border: 1px dashed rgba(255, 34, 34, 0.3); border-radius: 14px; padding: 25px 15px; text-align: center; color: #aaaaaa; font-size: 0.9rem;">
@@ -673,8 +678,8 @@ with col_queue:
             unsafe_allow_html=True
         )
     else:
-        for idx, item in enumerate(st.session_state.playlist):
-            es_actual = (idx == st.session_state.current_index)
+        for idx, item in enumerate(room.playlist):
+            es_actual = (idx == room.current_index)
             
             c_img, c_info, c_act1, c_act2 = st.columns([0.2, 0.52, 0.14, 0.14], vertical_alignment="center")
             
@@ -706,8 +711,8 @@ with col_queue:
         
         st.write("")
         if st.button("🗑️ Limpiar lista", use_container_width=True):
-            st.session_state.playlist = []
-            st.session_state.current_index = -1
+            room.playlist = []
+            room.current_index = -1
             st.rerun()
 
 # ---------------------------------------------------------
@@ -718,7 +723,7 @@ st.markdown("<br><hr style='border:1px solid rgba(255,34,34,0.2);'><br>", unsafe
 st.markdown("""
     <div class='qr-container'>
         <h2 style='color:#ff2222; margin-bottom:5px; font-weight:800;'>📱 ¡Escanea para poner tu música!</h2>
-        <p style='color:#cccccc; font-size:0.95rem; margin-top:0;'>Apunta con la cámara de tu teléfono para entrar a la app. (1 canción cada 5 minutos)</p>
+        <p style='color:#cccccc; font-size:0.95rem; margin-top:0;'>Apunta con la cámara de tu teléfono para entrar a la app. (1 canción cada 2 minutos)</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -732,10 +737,8 @@ with col_qr_center:
         key="app_url_input"
     )
     
-    # Generador de QR corregido (negro sobre blanco de alta definición)
     qr_code_api = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(url_app)}"
     
-    # Renderizado envuelto en contenedor blanco para garantizar legibilidad en dispositivos y cámaras
     st.markdown(
         f"""
         <div style="background-color: #ffffff; padding: 16px; border-radius: 16px; display: flex; justify-content: center; align-items: center; box-shadow: 0 0 20px rgba(255, 34, 34, 0.2); margin-top: 10px;">
