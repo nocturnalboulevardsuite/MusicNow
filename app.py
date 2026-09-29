@@ -762,7 +762,7 @@ with col_queue:
     mostrar_lista_de_espera()
 
 # ---------------------------------------------------------
-# SECCIÓN QR GENERADO LOCALMENTE (INMUNE A BLOQUEADORES)
+# SECCIÓN QR ULTRA RESILIENTE (CON RESPALDO INTEGRADO)
 # ---------------------------------------------------------
 st.markdown("<br><hr style='border:1px solid rgba(255,34,34,0.2);'><br>", unsafe_allow_html=True)
 
@@ -778,7 +778,6 @@ html_qr_autodetect = """
 <html>
 <head>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-<!-- Librería para renderizar el QR cliente/canvas localmente -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
     body {
@@ -796,6 +795,8 @@ html_qr_autodetect = """
         display: inline-block;
         box-shadow: 0 0 20px rgba(255, 34, 34, 0.25);
         margin-top: 5px;
+        min-width: 200px;
+        min-height: 200px;
     }
     #qrcode canvas, #qrcode img {
         margin: 0 auto;
@@ -846,91 +847,112 @@ html_qr_autodetect = """
     </div>
 
     <script>
-        var actualUrl = "";
-
-        function obtenerUrlReal() {
-            var url = "";
+        (function() {
+            var actualUrl = "http://localhost:8501";
+            
+            // Extracción ultra segura de la URL real
             try {
-                if (window.top !== window.self && document.referrer) {
-                    url = document.referrer;
-                }
-            } catch (e) {}
-
-            if (!url || url.indexOf("about:") === 0 || url === "null") {
+                var candidate = "";
                 try {
-                    if (window.parent && window.parent.location && window.parent.location.href) {
-                        url = window.parent.location.href;
+                    if (document.referrer && document.referrer.indexOf("about:") !== 0) {
+                        candidate = document.referrer;
                     }
                 } catch(e) {}
-            }
 
-            if (!url || url.indexOf("about:") === 0 || url === "null") {
-                url = window.location.href;
-            }
-
-            if (url) {
-                url = url.split('?')[0].split('#')[0];
-            }
-
-            if (!url || url.indexOf("about:") === 0 || url === "null" || url.indexOf("blob:") === 0) {
-                var host = window.location.host;
-                if (host && host !== "null") {
-                    url = window.location.protocol + "//" + host;
-                } else {
-                    url = "http://localhost:8501";
+                if (!candidate) {
+                    try {
+                        if (window.top && window.top.location && window.top.location.href) {
+                            candidate = window.top.location.href;
+                        }
+                    } catch(e) {}
                 }
+
+                if (!candidate) {
+                    try {
+                        if (window.parent && window.parent.location && window.parent.location.href) {
+                            candidate = window.parent.location.href;
+                        }
+                    } catch(e) {}
+                }
+
+                if (!candidate) {
+                    try {
+                        candidate = window.location.href;
+                    } catch(e) {}
+                }
+
+                if (candidate) {
+                    candidate = candidate.split('?')[0].split('#')[0];
+                    if (candidate && candidate.indexOf("about:") !== 0 && candidate.indexOf("blob:") !== 0 && candidate !== "null") {
+                        actualUrl = candidate;
+                    }
+                }
+            } catch(err) {
+                console.log("Fallback URL activado");
             }
-            return url;
-        }
 
-        actualUrl = obtenerUrlReal();
-        document.getElementById('url-display').innerText = actualUrl;
+            var urlDisplay = document.getElementById('url-display');
+            if (urlDisplay) urlDisplay.innerText = actualUrl;
 
-        function generarQR() {
+            // Renderizado del QR con fallback automático si el JS/CDN es bloqueado
             var qrContainer = document.getElementById("qrcode");
-            qrContainer.innerHTML = "";
-            new QRCode(qrContainer, {
-                text: actualUrl,
-                width: 200,
-                height: 200,
-                colorDark : "#000000",
-                colorLight : "#ffffff",
-                correctLevel : QRCode.CorrectLevel.H
-            });
-        }
 
-        // Ejecutar renderizado
-        if (typeof QRCode !== 'undefined') {
-            generarQR();
-        } else {
-            // Cargar de CDN secundario si el principal estuviera bloqueado
-            var s = document.createElement('script');
-            s.src = "https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js";
-            s.onload = generarQR;
-            document.head.appendChild(s);
-        }
-
-        function copiarEnlace() {
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(actualUrl).then(function() {
-                    alert("¡Enlace copiado al portapapeles!\nPégalo en WhatsApp.");
-                }).catch(function() {
-                    fallbackCopy();
-                });
-            } else {
-                fallbackCopy();
+            function renderizarQR() {
+                if (typeof QRCode !== 'undefined') {
+                    try {
+                        qrContainer.innerHTML = "";
+                        new QRCode(qrContainer, {
+                            text: actualUrl,
+                            width: 190,
+                            height: 190,
+                            colorDark : "#000000",
+                            colorLight : "#ffffff",
+                            correctLevel : QRCode.CorrectLevel.H
+                        });
+                        return;
+                    } catch(e) {}
+                }
+                
+                // Fallback instantáneo mediante API SVG en caso de bloqueo
+                qrContainer.innerHTML = '<img src="https://api.qrserver.com/v1/create-qr-code/?size=190x190&data=' + encodeURIComponent(actualUrl) + '" style="border-radius:6px; width:190px; height:190px; display:block; margin:0 auto;" alt="QR Code">';
             }
-        }
 
-        function fallbackCopy() {
-            var dummy = document.createElement("input");
-            document.body.appendChild(dummy);
-            dummy.value = actualUrl;
-            dummy.select();
-            document.execCommand("copy");
-            document.body.removeChild(dummy);
-            alert("¡Enlace copiado al portapapeles!\nPégalo en WhatsApp.");
-        }
+            // Ejecución
+            if (typeof QRCode !== 'undefined') {
+                renderizarQR();
+            } else {
+                var scriptFallback = document.createElement('script');
+                scriptFallback.src = "https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js";
+                scriptFallback.onload = renderizarQR;
+                scriptFallback.onerror = renderizarQR;
+                document.head.appendChild(scriptFallback);
+                
+                // Si tarda más de 600ms, fuerza el gráfico directo
+                setTimeout(renderizarQR, 600);
+            }
+
+            window.copiarEnlace = function() {
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(actualUrl).then(function() {
+                        alert("¡Enlace copiado al portapapeles!\nPégalo en WhatsApp.");
+                    }).catch(function() {
+                        fallbackCopy();
+                    });
+                } else {
+                    fallbackCopy();
+                }
+            };
+
+            function fallbackCopy() {
+                var dummy = document.createElement("input");
+                document.body.appendChild(dummy);
+                dummy.value = actualUrl;
+                dummy.select();
+                document.execCommand("copy");
+                document.body.removeChild(dummy);
+                alert("¡Enlace copiado al portapapeles!\nPégalo en WhatsApp.");
+            }
+        })();
     </script>
 </body>
 </html>
