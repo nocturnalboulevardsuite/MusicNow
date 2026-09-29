@@ -25,12 +25,38 @@ class SharedPartyRoom:
     def __init__(self):
         self.playlist = []
         self.current_index = -1
+        self.finished = False  # Indica si la última canción ya finalizó
 
 @st.cache_resource
 def get_party_room():
     return SharedPartyRoom()
 
 room = get_party_room()
+
+# Procesar eventos de auto-reproducción enviados desde el reproductor JS
+try:
+    query_params = st.query_params
+except AttributeError:
+    query_params = st.experimental_get_query_params()
+
+if "action" in query_params:
+    action_val = query_params["action"]
+    if isinstance(action_val, list):
+        action_val = action_val[0] if action_val else None
+    
+    if action_val == "next":
+        if room.playlist:
+            if room.current_index < len(room.playlist) - 1:
+                room.current_index += 1
+                room.finished = False
+            else:
+                room.finished = True
+    
+    try:
+        st.query_params.clear()
+    except Exception:
+        st.experimental_set_query_params()
+    st.rerun()
 
 # CSS Global
 st.markdown("""
@@ -254,25 +280,33 @@ def obtener_color_aleatorio():
 def reproducir_indice(idx):
     if 0 <= idx < len(room.playlist):
         room.current_index = idx
+        room.finished = False
 
 def siguiente_cancion():
     if room.playlist and room.current_index < len(room.playlist) - 1:
         room.current_index += 1
+        room.finished = False
 
 def anterior_cancion():
     if room.playlist and room.current_index > 0:
         room.current_index -= 1
+        room.finished = False
 
 def agregar_a_playlist(song):
     room.playlist.append(song)
     if room.current_index == -1:
         room.current_index = 0
+        room.finished = False
+    elif room.finished:
+        room.current_index += 1
+        room.finished = False
 
 def eliminar_de_playlist(idx):
     if 0 <= idx < len(room.playlist):
         room.playlist.pop(idx)
         if len(room.playlist) == 0:
             room.current_index = -1
+            room.finished = False
         elif room.current_index >= len(room.playlist):
             room.current_index = len(room.playlist) - 1
 
@@ -518,8 +552,21 @@ with col_main:
             }}
 
             function onPlayerStateChange(event) {{
-                if (event.data === 1) updateUIState(true);
-                else if (event.data === 2 || event.data === 0 || event.data === -1 || event.data === 5) updateUIState(false);
+                if (event.data === 1) {{
+                    updateUIState(true);
+                }} else if (event.data === 0) {{
+                    // Evento ENDED: La canción terminó. Pasar automáticamente a la siguiente canción
+                    updateUIState(false);
+                    setTimeout(function() {{
+                        try {{
+                            window.top.location.search = '?action=next';
+                        }} catch(e) {{
+                            window.parent.location.search = '?action=next';
+                        }}
+                    }}, 400);
+                }} else if (event.data === 2 || event.data === -1 || event.data === 5) {{
+                    updateUIState(false);
+                }}
             }}
 
             function togglePlay() {{
@@ -663,9 +710,9 @@ with col_main:
                 st.error(f"Error al realizar la búsqueda: {str(e)}")
 
 # ---------------------------------------------------------
-# COLUMNA DERECHA: LISTA DE ESPERA (COMPARTIDA)
+# COLUMNA DERECHA: LISTA DE ESPERA (TIEMPO REAL MULTI-USUARIO)
 # ---------------------------------------------------------
-with col_queue:
+def mostrar_lista_de_espera():
     st.markdown("### Lista de espera")
     
     if not room.playlist:
@@ -713,7 +760,15 @@ with col_queue:
         if st.button("🗑️ Limpiar lista", use_container_width=True):
             room.playlist = []
             room.current_index = -1
+            room.finished = False
             st.rerun()
+
+# Decorar con st.fragment para auto-refrescar la lista de espera cada 3s en todos los clientes
+if hasattr(st, "fragment"):
+    mostrar_lista_de_espera = st.fragment(run_every="3s")(mostrar_lista_de_espera)
+
+with col_queue:
+    mostrar_lista_de_espera()
 
 # ---------------------------------------------------------
 # CÓDIGO QR ABAJO DEL TODO (PARA MODO FIESTA)
