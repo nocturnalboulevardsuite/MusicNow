@@ -3,7 +3,6 @@ import streamlit.components.v1 as components
 from ytmusicapi import YTMusic
 import random
 import time
-import urllib.parse
 
 # Inicializar buscador de YouTube Music
 @st.cache_resource
@@ -25,7 +24,7 @@ class SharedPartyRoom:
     def __init__(self):
         self.playlist = []
         self.current_index = -1
-        self.finished = False  # Indica si la última canción ya finalizó
+        self.finished = False
 
 @st.cache_resource
 def get_party_room():
@@ -105,7 +104,7 @@ st.markdown("""
         100% { background-position: 0% 0%; }
     }
 
-    /* Ocultar instrucciones predeterminadas de Streamlit */
+    /* Ocultar instrucciones de Streamlit */
     div[data-testid="InputInstructions"], 
     div[data-testid="stInputInstructions"],
     [data-testid="stInputInstructions"],
@@ -115,7 +114,7 @@ st.markdown("""
         display: none !important;
     }
 
-    /* BARRA DE BÚSQUEDA Y BOTÓN */
+    /* BARRA DE BÚSQUEDA */
     div[data-testid="stForm"] {
         background-color: #16161a !important;
         border: 2px solid #ff2222 !important;
@@ -191,7 +190,6 @@ st.markdown("""
         transform: translateY(-1px);
     }
 
-    /* IMÁGENES DE MINIATURA */
     div[data-testid="stImage"] img {
         border-radius: 8px !important;
         object-fit: cover !important;
@@ -206,7 +204,7 @@ st.markdown("""
         margin-bottom: 12px !important;
     }
 
-    /* ESTILO DE LA LISTA DE ESPERA TIPO SPOTIFY ROJO TRANSPARENTE */
+    /* CONTENEDOR LISTA DE ESPERA */
     div[data-testid="stColumn"]:nth-child(2) {
         background: rgba(255, 34, 34, 0.05) !important;
         border: 1px solid rgba(255, 34, 34, 0.25) !important;
@@ -216,7 +214,6 @@ st.markdown("""
         backdrop-filter: blur(12px) !important;
     }
 
-    /* Filas individuales de canciones en la playlist */
     div[data-testid="stColumn"]:nth-child(2) div[data-testid="stHorizontalBlock"] {
         background: rgba(22, 22, 26, 0.65) !important;
         border: 1px solid rgba(255, 255, 255, 0.06) !important;
@@ -231,7 +228,6 @@ st.markdown("""
         border-color: rgba(255, 34, 34, 0.35) !important;
     }
 
-    /* Ajuste de botones pequeños de la lista */
     div[data-testid="stColumn"]:nth-child(2) div.stButton > button {
         padding: 4px 6px !important;
         font-size: 0.8rem !important;
@@ -240,7 +236,6 @@ st.markdown("""
         height: 36px !important;
     }
 
-    /* CONTENEDOR DEL CÓDIGO QR */
     .qr-container {
         background: rgba(22, 22, 26, 0.8);
         border: 1px solid rgba(255, 34, 34, 0.3);
@@ -253,21 +248,20 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Encabezado principal
+# Encabezado
 st.markdown("<h1 class='minimal-title'>MusicNow</h1>", unsafe_allow_html=True)
 st.markdown(
     "<p class='minimal-sub-wave'>Busca una canción y añádelo a la lista</p>", 
     unsafe_allow_html=True
 )
 
-# Estado individual del usuario (búsqueda y cooldown por teléfono)
 if 'current_query' not in st.session_state:
     st.session_state.current_query = ""
 
 if 'last_added_time' not in st.session_state:
     st.session_state.last_added_time = 0
 
-COOLDOWN_SECONDS = 120  # 2 minutos de espera entre cada canción agregada
+COOLDOWN_SECONDS = 120
 
 def obtener_color_aleatorio():
     colores = [
@@ -310,7 +304,6 @@ def eliminar_de_playlist(idx):
         elif room.current_index >= len(room.playlist):
             room.current_index = len(room.playlist) - 1
 
-# Obtener canción actual
 cancion_actual = None
 if 0 <= room.current_index < len(room.playlist):
     cancion_actual = room.playlist[room.current_index]
@@ -324,7 +317,7 @@ thumb_url = cancion_actual['thumbnail'] if cancion_actual else ""
 label_style = f"background-image: url('{thumb_url}'); background-size: cover; background-position: center; border: 2px solid {v_color};" if thumb_url else f"background-color: {v_color};"
 
 # ---------------------------------------------------------
-# ESTRUCTURA EN 2 COLUMNAS (REPRODUCTOR + PLAYLIST)
+# COLUMNAS REPRODUCTOR + PLAYLIST
 # ---------------------------------------------------------
 col_main, col_queue = st.columns([1.55, 1.05], gap="large")
 
@@ -555,7 +548,6 @@ with col_main:
                 if (event.data === 1) {{
                     updateUIState(true);
                 }} else if (event.data === 0) {{
-                    // Evento ENDED: La canción terminó. Pasar automáticamente a la siguiente canción
                     updateUIState(false);
                     setTimeout(function() {{
                         try {{
@@ -639,7 +631,7 @@ with col_main:
     if btn_buscar and query_input.strip():
         st.session_state.current_query = query_input.strip()
 
-    # BOTONES SIGUIENTE Y ANTERIOR
+    # CONTROLES SIGUIENTE / ANTERIOR
     if room.playlist:
         col_prev, col_info, col_next = st.columns([0.35, 0.3, 0.35], vertical_alignment="center")
         with col_prev:
@@ -710,7 +702,7 @@ with col_main:
                 st.error(f"Error al realizar la búsqueda: {str(e)}")
 
 # ---------------------------------------------------------
-# COLUMNA DERECHA: LISTA DE ESPERA (TIEMPO REAL MULTI-USUARIO)
+# COLUMNA DERECHA: LISTA DE ESPERA
 # ---------------------------------------------------------
 def mostrar_lista_de_espera():
     st.markdown("### Lista de espera")
@@ -763,7 +755,6 @@ def mostrar_lista_de_espera():
             room.finished = False
             st.rerun()
 
-# Decorar con st.fragment para auto-refrescar la lista de espera cada 3s en todos los clientes
 if hasattr(st, "fragment"):
     mostrar_lista_de_espera = st.fragment(run_every="3s")(mostrar_lista_de_espera)
 
@@ -771,7 +762,7 @@ with col_queue:
     mostrar_lista_de_espera()
 
 # ---------------------------------------------------------
-# CÓDIGO QR Y COMPARTIR AUTOMÁTICO (MODO FIESTA)
+# SECCIÓN QR CORREGIDA (COMPATIBLE CON IFRAME DE STREAMLIT)
 # ---------------------------------------------------------
 st.markdown("<br><hr style='border:1px solid rgba(255,34,34,0.2);'><br>", unsafe_allow_html=True)
 
@@ -839,9 +830,6 @@ html_qr_autodetect = """
         background-color: #20ba5a;
         transform: translateY(-1px);
     }
-    .btn-copy:active {
-        transform: translateY(0);
-    }
 </style>
 </head>
 <body>
@@ -858,18 +846,31 @@ html_qr_autodetect = """
     <script>
         var actualUrl = "";
         try {
-            actualUrl = window.top.location.href.split('?')[0];
+            // Se usa document.referrer para obtener la URL principal de Streamlit de forma segura
+            if (document.referrer && document.referrer !== "") {
+                actualUrl = document.referrer.split('?')[0];
+            } else {
+                actualUrl = window.location.href.split('?')[0];
+            }
         } catch (e) {
             actualUrl = window.location.href.split('?')[0];
         }
 
-        document.getElementById('qr-code-img').src = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(actualUrl);
-        document.getElementById('url-display').innerText = actualUrl;
+        if (!actualUrl || actualUrl.indexOf("about:") === 0) {
+            actualUrl = window.location.origin;
+        }
+
+        // Generación del código QR vía API
+        var imgElem = document.getElementById('qr-code-img');
+        var textElem = document.getElementById('url-display');
+
+        imgElem.src = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(actualUrl);
+        textElem.innerText = actualUrl;
 
         function copiarEnlace() {
             if (navigator.clipboard && window.isSecureContext) {
                 navigator.clipboard.writeText(actualUrl).then(function() {
-                    alert("¡Enlace copiado al portapapeles!\nPégalo directamente en tu chat de WhatsApp.");
+                    alert("¡Enlace copiado al portapapeles!\nPégalo en WhatsApp.");
                 }).catch(function() {
                     fallbackCopy();
                 });
@@ -885,7 +886,7 @@ html_qr_autodetect = """
             dummy.select();
             document.execCommand("copy");
             document.body.removeChild(dummy);
-            alert("¡Enlace copiado al portapapeles!\nPégalo directamente en tu chat de WhatsApp.");
+            alert("¡Enlace copiado al portapapeles!\nPégalo en WhatsApp.");
         }
     </script>
 </body>
