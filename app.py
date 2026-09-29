@@ -762,7 +762,7 @@ with col_queue:
     mostrar_lista_de_espera()
 
 # ---------------------------------------------------------
-# SECCIÓN QR CORREGIDA (COMPATIBLE CON IFRAME DE STREAMLIT)
+# SECCIÓN QR CORREGIDA (MULTICAPA Y COMPATIBLE)
 # ---------------------------------------------------------
 st.markdown("<br><hr style='border:1px solid rgba(255,34,34,0.2);'><br>", unsafe_allow_html=True)
 
@@ -800,6 +800,7 @@ html_qr_autodetect = """
         height: 200px;
         border-radius: 6px;
         display: block;
+        margin: 0 auto;
     }
     .url-text {
         color: #a0a0a0;
@@ -809,6 +810,7 @@ html_qr_autodetect = """
         max-width: 90%;
         margin-left: auto;
         margin-right: auto;
+        font-weight: 500;
     }
     .btn-copy {
         background-color: #25D366;
@@ -834,9 +836,9 @@ html_qr_autodetect = """
 </head>
 <body>
     <div class="qr-box">
-        <img id="qr-code-img" src="" alt="Cargando QR...">
+        <img id="qr-code-img" src="" alt="Código QR" onerror="qrError(this)">
     </div>
-    <div class="url-text" id="url-display">Detectando enlace...</div>
+    <div class="url-text" id="url-display">Cargando enlace...</div>
     <div>
         <button class="btn-copy" onclick="copiarEnlace()">
             <i class="fab fa-whatsapp"></i> Copiar enlace para WhatsApp
@@ -845,27 +847,60 @@ html_qr_autodetect = """
 
     <script>
         var actualUrl = "";
-        try {
-            // Se usa document.referrer para obtener la URL principal de Streamlit de forma segura
-            if (document.referrer && document.referrer !== "") {
-                actualUrl = document.referrer.split('?')[0];
-            } else {
-                actualUrl = window.location.href.split('?')[0];
+
+        function obtenerUrlReal() {
+            var url = "";
+            try {
+                if (window.top !== window.self && document.referrer) {
+                    url = document.referrer;
+                }
+            } catch (e) {}
+
+            if (!url || url.indexOf("about:") === 0 || url === "null") {
+                try {
+                    if (window.parent && window.parent.location && window.parent.location.href) {
+                        url = window.parent.location.href;
+                    }
+                } catch(e) {}
             }
-        } catch (e) {
-            actualUrl = window.location.href.split('?')[0];
+
+            if (!url || url.indexOf("about:") === 0 || url === "null") {
+                url = window.location.href;
+            }
+
+            if (url) {
+                url = url.split('?')[0].split('#')[0];
+            }
+
+            if (!url || url.indexOf("about:") === 0 || url === "null" || url.indexOf("blob:") === 0) {
+                var host = window.location.host;
+                if (host && host !== "null") {
+                    url = window.location.protocol + "//" + host;
+                } else {
+                    url = "http://localhost:8501";
+                }
+            }
+            return url;
         }
 
-        if (!actualUrl || actualUrl.indexOf("about:") === 0) {
-            actualUrl = window.location.origin;
-        }
+        actualUrl = obtenerUrlReal();
 
-        // Generación del código QR vía API
         var imgElem = document.getElementById('qr-code-img');
         var textElem = document.getElementById('url-display');
 
-        imgElem.src = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(actualUrl);
-        textElem.innerText = actualUrl;
+        if (textElem) textElem.innerText = actualUrl;
+
+        // API primaria QuickChart QR (alta compatibilidad)
+        var qrApiPrimary = "https://quickchart.io/qr?size=300&text=" + encodeURIComponent(actualUrl);
+        if (imgElem) imgElem.src = qrApiPrimary;
+
+        function qrError(img) {
+            // Respaldar con API secundaria si la primera falla
+            var fallbackUrl = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(actualUrl);
+            if (img.src !== fallbackUrl) {
+                img.src = fallbackUrl;
+            }
+        }
 
         function copiarEnlace() {
             if (navigator.clipboard && window.isSecureContext) {
