@@ -771,35 +771,125 @@ with col_queue:
     mostrar_lista_de_espera()
 
 # ---------------------------------------------------------
-# CÓDIGO QR ABAJO DEL TODO (PARA MODO FIESTA)
+# CÓDIGO QR Y COMPARTIR AUTOMÁTICO (MODO FIESTA)
 # ---------------------------------------------------------
 st.markdown("<br><hr style='border:1px solid rgba(255,34,34,0.2);'><br>", unsafe_allow_html=True)
 
 st.markdown("""
     <div class='qr-container'>
-        <h2 style='color:#ff2222; margin-bottom:5px; font-weight:800;'>📱 ¡Escanea para poner tu música!</h2>
-        <p style='color:#cccccc; font-size:0.95rem; margin-top:0;'>Apunta con la cámara de tu teléfono para entrar a la app. (1 canción cada 2 minutos)</p>
+        <h2 style='color:#ff2222; margin-bottom:5px; font-weight:800;'>📱 ¡Escanea o comparte para poner tu música!</h2>
+        <p style='color:#cccccc; font-size:0.95rem; margin-top:0;'>Apunta con la cámara de tu teléfono o copia el enlace directo para enviarlo por WhatsApp.</p>
     </div>
 """, unsafe_allow_html=True)
 
-col_qr_left, col_qr_center, col_qr_right = st.columns([1, 1.2, 1])
+html_qr_autodetect = """
+<!DOCTYPE html>
+<html>
+<head>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<style>
+    body {
+        background-color: transparent;
+        color: #ffffff;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        text-align: center;
+        margin: 0;
+        padding: 10px;
+    }
+    .qr-box {
+        background-color: #ffffff;
+        padding: 14px;
+        border-radius: 16px;
+        display: inline-block;
+        box-shadow: 0 0 20px rgba(255, 34, 34, 0.25);
+        margin-top: 5px;
+    }
+    .qr-box img {
+        width: 200px;
+        height: 200px;
+        border-radius: 6px;
+        display: block;
+    }
+    .url-text {
+        color: #a0a0a0;
+        font-size: 0.85rem;
+        margin-top: 12px;
+        word-break: break-all;
+        max-width: 90%;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    .btn-copy {
+        background-color: #25D366;
+        color: #ffffff;
+        border: none;
+        border-radius: 10px;
+        padding: 10px 18px;
+        font-size: 0.9rem;
+        font-weight: 700;
+        cursor: pointer;
+        margin-top: 12px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.2s ease;
+        box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);
+    }
+    .btn-copy:hover {
+        background-color: #20ba5a;
+        transform: translateY(-1px);
+    }
+    .btn-copy:active {
+        transform: translateY(0);
+    }
+</style>
+</head>
+<body>
+    <div class="qr-box">
+        <img id="qr-code-img" src="" alt="Cargando QR...">
+    </div>
+    <div class="url-text" id="url-display">Detectando enlace...</div>
+    <div>
+        <button class="btn-copy" onclick="copiarEnlace()">
+            <i class="fab fa-whatsapp"></i> Copiar enlace para WhatsApp
+        </button>
+    </div>
 
-with col_qr_center:
-    url_app = st.text_input(
-        "Enlace de tu aplicación:", 
-        value="https://share.streamlit.io", 
-        help="Cambia este enlace por la URL pública de tu web para actualizar el QR al instante.",
-        key="app_url_input"
-    )
-    
-    qr_code_api = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(url_app)}"
-    
-    st.markdown(
-        f"""
-        <div style="background-color: #ffffff; padding: 16px; border-radius: 16px; display: flex; justify-content: center; align-items: center; box-shadow: 0 0 20px rgba(255, 34, 34, 0.2); margin-top: 10px;">
-            <img src="{qr_code_api}" style="width: 100%; max-width: 240px; height: auto; border-radius: 4px;">
-        </div>
-        <p style="text-align: center; color: #a0a0a0; font-size: 0.85rem; margin-top: 10px;">Escanea el código QR con tu celular</p>
-        """,
-        unsafe_allow_html=True
-    )
+    <script>
+        var actualUrl = "";
+        try {
+            actualUrl = window.top.location.href.split('?')[0];
+        } catch (e) {
+            actualUrl = window.location.href.split('?')[0];
+        }
+
+        document.getElementById('qr-code-img').src = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(actualUrl);
+        document.getElementById('url-display').innerText = actualUrl;
+
+        function copiarEnlace() {
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(actualUrl).then(function() {
+                    alert("¡Enlace copiado al portapapeles!\nPégalo directamente en tu chat de WhatsApp.");
+                }).catch(function() {
+                    fallbackCopy();
+                });
+            } else {
+                fallbackCopy();
+            }
+        }
+
+        function fallbackCopy() {
+            var dummy = document.createElement("input");
+            document.body.appendChild(dummy);
+            dummy.value = actualUrl;
+            dummy.select();
+            document.execCommand("copy");
+            document.body.removeChild(dummy);
+            alert("¡Enlace copiado al portapapeles!\nPégalo directamente en tu chat de WhatsApp.");
+        }
+    </script>
+</body>
+</html>
+"""
+
+components.html(html_qr_autodetect, height=350)
