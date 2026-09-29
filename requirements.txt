@@ -1,2 +1,4 @@
 streamlit
 ytmusicapi
+qrcode
+pillow
