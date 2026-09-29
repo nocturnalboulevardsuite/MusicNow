@@ -762,7 +762,7 @@ with col_queue:
     mostrar_lista_de_espera()
 
 # ---------------------------------------------------------
-# SECCIÓN QR ULTRA RESILIENTE (CON RESPALDO INTEGRADO)
+# SECCIÓN QR ULTRA RESILIENTE (INMUNE A BLOQUEADORES)
 # ---------------------------------------------------------
 st.markdown("<br><hr style='border:1px solid rgba(255,34,34,0.2);'><br>", unsafe_allow_html=True)
 
@@ -778,7 +778,6 @@ html_qr_autodetect = """
 <html>
 <head>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
     body {
         background-color: transparent;
@@ -795,13 +794,15 @@ html_qr_autodetect = """
         display: inline-block;
         box-shadow: 0 0 20px rgba(255, 34, 34, 0.25);
         margin-top: 5px;
-        min-width: 200px;
-        min-height: 200px;
+        min-width: 190px;
+        min-height: 190px;
     }
     #qrcode canvas, #qrcode img {
         margin: 0 auto;
         border-radius: 6px;
         display: block;
+        width: 190px;
+        height: 190px;
     }
     .url-text {
         color: #a0a0a0;
@@ -839,7 +840,7 @@ html_qr_autodetect = """
     <div class="qr-box">
         <div id="qrcode"></div>
     </div>
-    <div class="url-text" id="url-display">Cargando enlace...</div>
+    <div class="url-text" id="url-display">Obteniendo enlace...</div>
     <div>
         <button class="btn-copy" onclick="copiarEnlace()">
             <i class="fab fa-whatsapp"></i> Copiar enlace para WhatsApp
@@ -849,87 +850,32 @@ html_qr_autodetect = """
     <script>
         (function() {
             var actualUrl = "http://localhost:8501";
-            
-            // Extracción ultra segura de la URL real
+
+            // Extraer la URL contenedora sin riesgo de detener la ejecución por CORS
             try {
-                var candidate = "";
-                try {
-                    if (document.referrer && document.referrer.indexOf("about:") !== 0) {
-                        candidate = document.referrer;
-                    }
-                } catch(e) {}
-
-                if (!candidate) {
-                    try {
-                        if (window.top && window.top.location && window.top.location.href) {
-                            candidate = window.top.location.href;
-                        }
-                    } catch(e) {}
+                var ref = document.referrer;
+                if (ref && ref.indexOf("about:") !== 0 && ref.indexOf("blob:") !== 0 && ref !== "null") {
+                    actualUrl = ref.split('?')[0].split('#')[0];
+                } else if (window.location && window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+                    actualUrl = window.location.ancestorOrigins[0];
                 }
-
-                if (!candidate) {
-                    try {
-                        if (window.parent && window.parent.location && window.parent.location.href) {
-                            candidate = window.parent.location.href;
-                        }
-                    } catch(e) {}
-                }
-
-                if (!candidate) {
-                    try {
-                        candidate = window.location.href;
-                    } catch(e) {}
-                }
-
-                if (candidate) {
-                    candidate = candidate.split('?')[0].split('#')[0];
-                    if (candidate && candidate.indexOf("about:") !== 0 && candidate.indexOf("blob:") !== 0 && candidate !== "null") {
-                        actualUrl = candidate;
-                    }
-                }
-            } catch(err) {
-                console.log("Fallback URL activado");
-            }
+            } catch(e) {}
 
             var urlDisplay = document.getElementById('url-display');
-            if (urlDisplay) urlDisplay.innerText = actualUrl;
+            if (urlDisplay) {
+                urlDisplay.innerText = actualUrl;
+            }
 
-            // Renderizado del QR con fallback automático si el JS/CDN es bloqueado
             var qrContainer = document.getElementById("qrcode");
 
-            function renderizarQR() {
-                if (typeof QRCode !== 'undefined') {
-                    try {
-                        qrContainer.innerHTML = "";
-                        new QRCode(qrContainer, {
-                            text: actualUrl,
-                            width: 190,
-                            height: 190,
-                            colorDark : "#000000",
-                            colorLight : "#ffffff",
-                            correctLevel : QRCode.CorrectLevel.H
-                        });
-                        return;
-                    } catch(e) {}
+            // Renderizado de imagen QR directo que no depende de librerías JS externas bloqueables
+            function cargarImagenQR() {
+                if (qrContainer) {
+                    qrContainer.innerHTML = '<img src="https://api.qrserver.com/v1/create-qr-code/?size=190x190&data=' + encodeURIComponent(actualUrl) + '" alt="Código QR">';
                 }
-                
-                // Fallback instantáneo mediante API SVG en caso de bloqueo
-                qrContainer.innerHTML = '<img src="https://api.qrserver.com/v1/create-qr-code/?size=190x190&data=' + encodeURIComponent(actualUrl) + '" style="border-radius:6px; width:190px; height:190px; display:block; margin:0 auto;" alt="QR Code">';
             }
 
-            // Ejecución
-            if (typeof QRCode !== 'undefined') {
-                renderizarQR();
-            } else {
-                var scriptFallback = document.createElement('script');
-                scriptFallback.src = "https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js";
-                scriptFallback.onload = renderizarQR;
-                scriptFallback.onerror = renderizarQR;
-                document.head.appendChild(scriptFallback);
-                
-                // Si tarda más de 600ms, fuerza el gráfico directo
-                setTimeout(renderizarQR, 600);
-            }
+            cargarImagenQR();
 
             window.copiarEnlace = function() {
                 if (navigator.clipboard && window.isSecureContext) {
