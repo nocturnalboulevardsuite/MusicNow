@@ -2,10 +2,10 @@
 MusicNow - Party Mode
 Gramola colaborativa en tiempo real con Streamlit + YouTube Music.
 
-  * Invitados: ven lo que suena, buscan y piden canciones (cooldown de 2 min)
-    y pueden quitar las canciones que ellos mismos pidieron.
-  * Anfitrión (PIN): controla la cola, sin cooldown, y elige si su equipo
-    (PC / Smart TV) es el que reproduce el audio.
+  * Todos (admin e invitados) ven y pueden ESCUCHAR lo mismo, sincronizado:
+    el servidor lleva el reloj de la canción y cada dispositivo se ajusta a él.
+  * Invitados: escuchan, piden canciones (1 cada 2 minutos) y quitan las suyas.
+  * Admin (PIN): pausa, adelanta/retrocede, cambia de canción y maneja la cola.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ st.set_page_config(
 
 
 # =========================================================
-# CONFIGURACIÓN (sobreescribible en Settings → Secrets)
+# CONFIGURACIÓN (Settings → Secrets)
 # =========================================================
 def _secret(nombre: str, defecto):
     try:
@@ -47,6 +47,10 @@ def _secret(nombre: str, defecto):
 APP_URL = str(_secret("APP_URL", "https://musicnowcl.streamlit.app"))
 HOST_PIN = str(_secret("HOST_PIN", "1234"))
 PIN_POR_DEFECTO = HOST_PIN == "1234"
+
+# Súbelo cada vez que cambies la clase PartyRoom: obliga a Streamlit a crear
+# una sala nueva en vez de reutilizar la antigua guardada en caché.
+ROOM_VERSION = 3
 
 COOLDOWN_SECONDS = 120
 MAX_RESULTADOS = 5
@@ -75,22 +79,43 @@ def incrustar_html(codigo: str, alto: int):
 
 
 # =========================================================
-# SALA COMPARTIDA (thread-safe)
+# SALA COMPARTIDA (thread-safe) CON RELOJ DE REPRODUCCIÓN
 # =========================================================
-class SharedPartyRoom:
+class PartyRoom:
+    """El servidor es el reloj: guarda en qué segundo va la canción
+    (anchor = momento en que habría empezado) y si está en pausa."""
+
     def __init__(self):
         self.lock = threading.RLock()
         self.playlist: list[dict] = []
         self.current_index = -1
         self.finished = False
-        self.started_at = 0.0
+        self.anchor = 0.0
+        self.paused_pos: float | None = None
+        self.epoch = 0
         self.last_request: dict[str, float] = {}
 
-    # ---- internos (con lock tomado) ----
+    # ---------- internos (con lock tomado) ----------
     def _poner_actual(self, idx: int):
         self.current_index = idx
         self.finished = False
-        self.started_at = time.time()
+        self.anchor = time.time()
+        self.paused_pos = None
+        self.epoch += 1
+
+    def _actual(self):
+        if not self.finished and 0 <= self.current_index < len(self.playlist):
+            return self.playlist[self.current_index]
+        return None
+
+    def _token(self) -> str:
+        actual = self._actual()
+        return f"{actual['uid']}:{self.epoch}" if actual else ""
+
+    def _posicion(self) -> float:
+        if self.paused_pos is not None:
+            return self.paused_pos
+        return max(0.0, time.time() - self.anchor)
 
     def _indice(self, uid: str):
         for i, c in enumerate(self.playlist):
@@ -108,11 +133,12 @@ class SharedPartyRoom:
             self._poner_actual(self.current_index + 1)
         else:
             self.finished = True
+            self.paused_pos = None
 
-    # ---- lectura ----
+    # ---------- lectura ----------
     def snapshot(self):
         with self.lock:
-            return [dict(c) for c in self.playlist], self.current_index, self.finished, self.started_at
+            return [dict(c) for c in self.playlist], self.current_index, self.finished
 
     def ids_pendientes(self) -> set[str]:
         with self.lock:
@@ -123,7 +149,40 @@ class SharedPartyRoom:
             ultimo = self.last_request.get(invitado, 0)
         return max(0.0, COOLDOWN_SECONDS - (time.time() - ultimo))
 
-    # ---- escritura ----
+    def estado(self) -> dict:
+        with self.lock:
+            actual = self._actual()
+            idx, total = self.current_index, len(self.playlist)
+            siguiente = self.playlist[idx + 1]["title"] if actual and idx + 1 < total else ""
+            return {
+                "token": self._token(),
+                "vid": actual["video_id"] if actual else "",
+                "title": actual["title"] if actual else "",
+                "artist": actual["artist"] if actual else "",
+                "thumb": actual["thumbnail"] if actual else "",
+                "color": actual["color"] if actual else "#ff2222",
+                "dur": actual.get("dur", 0) if actual else 0,
+                "pos": idx + 1,
+                "total": total,
+                "next": siguiente,
+                "can_prev": bool(self.playlist) and (self.finished or idx > 0),
+                "can_next": bool(actual),
+                "now": time.time(),
+                "anchor": self.anchor,
+                "paused": self.paused_pos is not None,
+                "ppos": self.paused_pos or 0.0,
+            }
+
+    # ---------- escritura ----------
+    def tick(self):
+        """Avanza solo si la canción ya terminó según su duración
+        (funciona aunque nadie tenga el reproductor abierto)."""
+        with self.lock:
+            actual = self._actual()
+            if actual and self.paused_pos is None and actual.get("dur", 0) > 0:
+                if self._posicion() > actual["dur"] + 3:
+                    self._avanzar()
+
     def agregar(self, cancion: dict, invitado: str, es_host: bool) -> tuple[bool, str]:
         with self.lock:
             if not es_host:
@@ -152,32 +211,6 @@ class SharedPartyRoom:
             if idx is not None:
                 self._poner_actual(idx)
 
-    def siguiente(self):
-        with self.lock:
-            if self.playlist and not self.finished:
-                self._avanzar()
-
-    def anterior(self):
-        with self.lock:
-            if not self.playlist:
-                return
-            if self.finished:
-                self._poner_actual(self.current_index)
-            elif self.current_index > 0:
-                self._poner_actual(self.current_index - 1)
-
-    def cancion_terminada(self):
-        """El reproductor avisa que el tema terminó (con guardia anti-doble aviso)."""
-        with self.lock:
-            if not self.finished and time.time() - self.started_at >= GUARDIA_FIN_SEG:
-                self._avanzar()
-
-    def cancion_fallida(self):
-        """El video no se puede incrustar: se salta sin esperar la guardia."""
-        with self.lock:
-            if self.playlist and not self.finished:
-                self._avanzar()
-
     def eliminar(self, uid: str):
         with self.lock:
             idx = self._indice(uid)
@@ -199,19 +232,68 @@ class SharedPartyRoom:
     def limpiar(self):
         with self.lock:
             self.playlist.clear()
-            self.current_index, self.finished, self.started_at = -1, False, 0.0
+            self.current_index, self.finished = -1, False
+            self.paused_pos = None
+
+    def comando(self, cmd: dict, es_host: bool):
+        """Órdenes enviadas por los reproductores. Los invitados solo pueden
+        avisar que la canción terminó o falló; el resto es exclusivo del admin."""
+        c = cmd.get("c")
+        with self.lock:
+            actual = self._actual()
+
+            if c in ("ended", "skip"):
+                if not actual or cmd.get("tok") != self._token():
+                    return  # aviso viejo o repetido: se ignora
+                pos, dur = self._posicion(), actual.get("dur", 0)
+                if c == "ended":
+                    if pos < GUARDIA_FIN_SEG or (dur and pos < dur - 10 and not es_host):
+                        return
+                elif not es_host and pos > 20:
+                    return
+                self._avanzar()
+                return
+
+            if not es_host:
+                return
+
+            if c == "next" and self.playlist and not self.finished:
+                self._avanzar()
+            elif c == "prev" and self.playlist:
+                if self.finished:
+                    self._poner_actual(self.current_index)
+                elif self._posicion() > 5 or self.current_index == 0:
+                    self._poner_actual(self.current_index)  # vuelve al inicio
+                else:
+                    self._poner_actual(self.current_index - 1)
+            elif c == "pause" and actual and self.paused_pos is None:
+                self.paused_pos = self._posicion()
+            elif c == "play" and actual and self.paused_pos is not None:
+                self.anchor = time.time() - self.paused_pos
+                self.paused_pos = None
+            elif c == "seek" and actual:
+                try:
+                    t = max(0.0, float(cmd.get("t", 0)))
+                except (TypeError, ValueError):
+                    return
+                if actual.get("dur"):
+                    t = min(t, actual["dur"] - 1)
+                if self.paused_pos is not None:
+                    self.paused_pos = t
+                else:
+                    self.anchor = time.time() - t
 
 
 @st.cache_resource
-def get_party_room() -> SharedPartyRoom:
-    return SharedPartyRoom()
+def get_party_room(version: int) -> PartyRoom:
+    return PartyRoom()
 
 
-room = get_party_room()
+room = get_party_room(ROOM_VERSION)
 
 
 # =========================================================
-# IDENTIDAD Y MODO ANFITRIÓN
+# IDENTIDAD Y MODO ADMIN
 # =========================================================
 def obtener_id_invitado() -> str:
     gid = st.query_params.get("g", "")
@@ -227,7 +309,7 @@ def pin_valido(pin: str) -> bool:
 
 GUEST_ID = obtener_id_invitado()
 ES_HOST = pin_valido(st.query_params.get("host", ""))
-AUDIO_AQUI = ES_HOST and st.query_params.get("audio", "1") != "0"
+AUTO_AUDIO = ES_HOST and st.query_params.get("audio", "1") != "0"
 
 
 # =========================================================
@@ -245,6 +327,19 @@ def mejor_miniatura(thumbnails: list[dict]) -> str:
     if not thumbnails:
         return ""
     return re.sub(r"=w\d+-h\d+", "=w400-h400", thumbnails[-1].get("url", ""))
+
+
+def a_segundos(item: dict) -> int:
+    seg = item.get("duration_seconds")
+    if isinstance(seg, (int, float)) and seg > 0:
+        return int(seg)
+    total = 0
+    try:
+        for parte in (item.get("duration") or "").split(":"):
+            total = total * 60 + int(parte)
+    except ValueError:
+        return 0
+    return total
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -269,6 +364,7 @@ def buscar_canciones(consulta: str):
                 "title": item.get("title") or "Canción desconocida",
                 "artist": artistas or item.get("author") or "Artista desconocido",
                 "duration": item.get("duration") or "",
+                "dur": a_segundos(item),
                 "thumbnail": mejor_miniatura(item.get("thumbnails") or []),
             })
             if len(resultados) >= MAX_RESULTADOS:
@@ -290,7 +386,7 @@ def on_agregar(resultado: dict, invitado: str, es_host: bool):
     ok, mensaje = room.agregar(cancion, invitado, es_host)
     st.session_state.flash = ("ok" if ok else "warn", mensaje)
     if ok and not es_host:
-        st.session_state.current_query = ""  # cierra los resultados
+        st.session_state.current_query = ""
 
 
 def on_cerrar_resultados():
@@ -302,24 +398,18 @@ def on_limpiar_confirmado():
     st.session_state.confirmar_limpiar = False
 
 
+def on_cmd(es_host: bool):
+    """Recibe órdenes del reproductor a través de un campo oculto."""
+    try:
+        cmd = json.loads(st.session_state.get("mn_cmd") or "")
+    except ValueError:
+        return
+    if isinstance(cmd, dict):
+        room.comando(cmd, es_host)
+
+
 def estado_codificado() -> str:
-    """Estado de la sala en base64/JSON. El reproductor lo lee desde el DOM."""
-    playlist, idx, terminado, inicio = room.snapshot()
-    actual = playlist[idx] if (not terminado and 0 <= idx < len(playlist)) else None
-    payload = {
-        "token": f"{actual['uid']}:{inicio:.3f}" if actual else "",
-        "vid": actual["video_id"] if actual else "",
-        "title": actual["title"] if actual else "",
-        "artist": actual["artist"] if actual else "",
-        "thumb": actual["thumbnail"] if actual else "",
-        "color": actual["color"] if actual else "#ff2222",
-        "pos": idx + 1,
-        "total": len(playlist),
-        "next": playlist[idx + 1]["title"] if actual and idx + 1 < len(playlist) else "",
-        "can_prev": bool(playlist) and (terminado or idx > 0),
-        "can_next": bool(actual),
-    }
-    return base64.b64encode(json.dumps(payload, ensure_ascii=False).encode()).decode()
+    return base64.b64encode(json.dumps(room.estado(), ensure_ascii=False).encode()).decode()
 
 
 # =========================================================
@@ -370,9 +460,10 @@ h1.mn-title a, [data-testid="stHeaderActionElements"] { display: none !important
 .mn-hint  { text-align: center; color: #8a8a95; font-size: 0.8rem; margin: 0.3rem 0 0.4rem; }
 
 /* ---------- Canal oculto Python ↔ reproductor ---------- */
-.st-key-mn_state, .st-key-mn_ended, .st-key-mn_skip, .st-key-mn_prev, .st-key-mn_next { display: none !important; }
+.st-key-mn_state, .st-key-mn_cmd { display: none !important; }
 
-/* ---------- Buscador (píldora con brillo) ---------- */
+/* ---------- Buscador ---------- */
+.st-key-search_box { margin-top: -0.9rem; }
 .st-key-search_box [data-testid="stForm"] {
     background: #141418 !important; border: 1.5px solid rgba(255, 34, 34, 0.55) !important;
     border-radius: 999px !important; padding: 4px 5px 4px 16px !important;
@@ -393,32 +484,30 @@ h1.mn-title a, [data-testid="stHeaderActionElements"] { display: none !important
 }
 .st-key-search_box button:hover { background: #ff4545 !important; box-shadow: 0 0 18px rgba(255, 34, 34, 0.6) !important; }
 
-/* ---------- Botones generales (fantasma) ---------- */
+/* ---------- Botones fantasma ---------- */
 .stButton button, div[data-testid="stPopover"] > div > button {
     background: transparent !important; color: #c9c9d1 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important;
     border-radius: 999px !important; font-size: 0.82rem; font-weight: 500; transition: all 0.2s ease;
 }
-.stButton button:disabled { opacity: 0.4; }
-[class*="st-key-li-"] [data-testid="stElementToolbar"] { display: none !important; }
-[class*="st-key-li-"] [data-testid="stColumn"]:nth-child(1) { overflow: hidden; }
 .stButton button:hover:enabled, div[data-testid="stPopover"] > div > button:hover {
     background: #ff2222 !important; border-color: #ff2222 !important; color: #fff !important;
     box-shadow: 0 0 14px rgba(255, 34, 34, 0.45);
 }
+.stButton button:disabled { opacity: 0.4; }
 
-/* ---------- Filas (resultados y cola): nunca se apilan en móvil ---------- */
+/* ---------- Filas (resultados y cola) ---------- */
 [class*="st-key-li-"] { padding: 6px 8px; border-radius: 14px; transition: background 0.2s ease; margin-bottom: -0.55rem; }
 [class*="st-key-li-"]:hover { background: rgba(255, 255, 255, 0.04); }
 [class*="st-key-li-"] [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; gap: 0.7rem !important; align-items: center !important; }
 [class*="st-key-li-"] [data-testid="stColumn"] { min-width: 0 !important; width: auto !important; }
-[class*="st-key-li-"] [data-testid="stColumn"]:nth-child(1) { flex: 0 0 44px !important; }
+[class*="st-key-li-"] [data-testid="stColumn"]:nth-child(1) { flex: 0 0 44px !important; overflow: hidden; }
 [class*="st-key-li-"] [data-testid="stColumn"]:nth-child(2) { flex: 1 1 auto !important; }
 [class*="st-key-li-"] [data-testid="stColumn"]:nth-child(n+3) { flex: 0 0 34px !important; }
+[class*="st-key-li-"] [data-testid="stElementToolbar"] { display: none !important; }
 [class*="st-key-li-"] img { width: 44px !important; height: 44px !important; border-radius: 9px; object-fit: cover; }
 [class*="st-key-li-"] .stButton button {
     width: 34px !important; min-width: 34px !important; height: 34px !important; min-height: 34px !important;
-    padding: 0 !important; border-radius: 50% !important;
-    display: flex; align-items: center; justify-content: center;
+    padding: 0 !important; border-radius: 50% !important; display: flex; align-items: center; justify-content: center;
 }
 [class*="st-key-li-"] .stButton button span[data-testid="stIconMaterial"] { font-size: 1.1rem; }
 .li-t { font-size: 0.88rem; font-weight: 600; color: #f2f2f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -426,21 +515,17 @@ h1.mn-title a, [data-testid="stHeaderActionElements"] { display: none !important
 .li-n { color: #ff4d4d; font-weight: 700; margin-right: 6px; font-variant-numeric: tabular-nums; }
 .li-me { color: #ff8080; }
 
-/* ---------- Expander minimalista ---------- */
 [data-testid="stExpander"] details { border: none !important; background: transparent !important; }
 [data-testid="stExpander"] summary { color: #7a7a85; font-size: 0.8rem; padding-left: 4px; }
 
-/* ---------- Pie ---------- */
 .st-key-host_area { align-items: center; margin-top: 0.8rem; }
-.st-key-search_box { margin-top: -0.9rem; }
 .st-key-tools_row [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; justify-content: center; }
 </style>
 """, unsafe_allow_html=True)
 
 
 # =========================================================
-# REPRODUCTOR (iframe persistente: su HTML no cambia, así el audio
-# nunca se corta; lee el estado de la sala desde el DOM de la página)
+# REPRODUCTOR SINCRONIZADO (iframe persistente)
 # =========================================================
 PLAYER_TEMPLATE = r"""
 <!DOCTYPE html>
@@ -479,7 +564,7 @@ PLAYER_TEMPLATE = r"""
     box-shadow: 0 14px 34px rgba(0,0,0,0.75), 0 0 0 1px rgba(255,255,255,0.04), 0 0 22px var(--accent);
     transition: box-shadow 0.8s ease;
   }
-  .stage::after {  /* reflejo fijo, no gira */
+  .stage::after {
     content: ''; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
     background: conic-gradient(from 20deg, transparent 0deg 40deg, rgba(255,255,255,0.07) 62deg, transparent 84deg 220deg,
                 rgba(255,255,255,0.05) 242deg, transparent 264deg);
@@ -522,8 +607,11 @@ PLAYER_TEMPLATE = r"""
   input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 0 8px var(--accent); }
   input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border: none; border-radius: 50%; background: #fff; }
   #progress { flex: 1; }
+  .wrap:not(.host) #progress { pointer-events: none; cursor: default; }
+  .wrap:not(.host) #progress::-webkit-slider-thumb { width: 0; height: 0; box-shadow: none; }
+  .wrap:not(.host) #progress::-moz-range-thumb { width: 0; height: 0; }
 
-  /* Controles */
+  /* Controles (solo admin) */
   .controls { display: flex; align-items: center; justify-content: center; gap: 22px; margin-top: 14px; }
   .icon-btn { width: 44px; height: 44px; border-radius: 50%; border: none; background: transparent; color: #d4d4db;
               display: grid; place-items: center; cursor: pointer; transition: all 0.2s ease; }
@@ -533,26 +621,33 @@ PLAYER_TEMPLATE = r"""
   .play-btn { width: 60px; height: 60px; background: var(--accent); color: #fff; box-shadow: 0 0 22px var(--accent); }
   .play-btn svg { width: 26px; height: 26px; }
   .play-btn:hover:enabled { background: var(--accent); transform: scale(1.06); }
-  .volume { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--muted); }
-  .volume svg { width: 16px; height: 16px; fill: currentColor; }
-  #volume { width: 120px; }
 
-  .remote { margin-top: 16px; font-size: 0.78rem; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-  .eq { display: inline-flex; gap: 2px; height: 11px; align-items: flex-end; }
-  .eq i { width: 3px; background: var(--accent); border-radius: 2px; animation: eq 0.9s ease-in-out infinite; }
+  /* Escuchar aquí + volumen (todos) */
+  .listen-row { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 16px; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 999px; cursor: pointer;
+    font-family: inherit; font-size: 0.8rem; font-weight: 600; color: #e9e9ee;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14); transition: all 0.2s ease;
+  }
+  .pill:hover { border-color: var(--accent); }
+  .listening .pill { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 16px var(--accent); color: #fff; }
+  .pill svg { width: 16px; height: 16px; fill: currentColor; }
+  .eq { display: none; gap: 2px; height: 11px; align-items: flex-end; }
+  .listening:not(.paused) .eq { display: inline-flex; }
+  .eq i { width: 3px; background: #fff; border-radius: 2px; animation: eq 0.9s ease-in-out infinite; }
   .eq i:nth-child(2) { animation-delay: 0.2s; } .eq i:nth-child(3) { animation-delay: 0.4s; }
   @keyframes eq { 0%, 100% { height: 3px; } 50% { height: 11px; } }
+  .volume { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  .volume svg { width: 16px; height: 16px; fill: currentColor; }
+  #volume { width: 110px; }
+  .wrap:not(.listening) .volume { display: none; }
 
   .upnext { margin-top: 16px; font-size: 0.76rem; color: #6f6f7a; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .upnext b { color: #b5b5bf; font-weight: 600; }
   .notice { margin-top: 8px; font-size: 0.76rem; color: #ffb020; min-height: 1em; }
 
-  /* Visibilidad por modo */
-  .empty .progress, .empty .volume, .empty .remote, .empty .upnext, .empty #play { display: none !important; }
-  .wrap:not(.audio) .progress, .wrap:not(.audio) .volume, .wrap:not(.audio) #play { display: none !important; }
+  .empty .progress, .empty .controls, .empty .listen-row, .empty .upnext { display: none !important; }
   .wrap:not(.host) .controls { display: none !important; }
-  .wrap.audio .remote { display: none !important; }
-  .empty .controls { display: none !important; }
 
   #yt { position: fixed; left: 0; top: 0; width: 200px; height: 200px; opacity: 0.001; pointer-events: none; z-index: -1; }
 </style>
@@ -566,7 +661,7 @@ PLAYER_TEMPLATE = r"""
     <div id="vinyl" class="vinyl"><div id="label" class="label"><div class="hole"></div></div></div>
     <button id="unlock" class="unlock">
       <svg viewBox="0 0 24 24"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>
-      Toca para activar<br>el sonido
+      Toca para escuchar
     </button>
   </div>
 
@@ -582,34 +677,49 @@ PLAYER_TEMPLATE = r"""
 
   <div class="controls">
     <button id="prev" class="icon-btn" title="Anterior"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM9.5 12 18 18V6z"/></svg></button>
-    <button id="play" class="icon-btn play-btn" title="Play / Pausa"><svg id="play-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+    <button id="play" class="icon-btn play-btn" title="Play / Pausa"><svg id="play-icon" viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></button>
     <button id="next" class="icon-btn" title="Siguiente"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
   </div>
 
-  <div class="volume">
-    <svg viewBox="0 0 24 24"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
-    <input id="volume" type="range" min="0" max="100" value="100">
+  <div class="listen-row">
+    <button id="listen" class="pill">
+      <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-9 9v7a2 2 0 0 0 2 2h2v-8H5v-1a7 7 0 0 1 14 0v1h-2v8h2a2 2 0 0 0 2-2v-7a9 9 0 0 0-9-9z"/></svg>
+      <span id="listen-text">Escuchar aquí</span>
+      <span class="eq"><i></i><i></i><i></i></span>
+    </button>
+    <div class="volume">
+      <svg viewBox="0 0 24 24"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
+      <input id="volume" type="range" min="0" max="100" value="100">
+    </div>
   </div>
 
-  <div class="remote"><span class="eq"><i></i><i></i><i></i></span>Suena en el equipo del anfitrión</div>
   <div id="upnext" class="upnext">A continuación · <b id="upnext-title"></b></div>
   <div id="notice" class="notice"></div>
 </div>
 
 <script>
-  const AUDIO = __AUDIO__, HOST = __HOST__;
+  const HOST = __HOST__, AUTO = __AUTO__;
   const P = window.parent.document;
   const $ = (id) => document.getElementById(id);
   const root = $('root');
   const ICON_PLAY = '<path d="M8 5v14l11-7z"/>';
   const ICON_PAUSE = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>';
 
-  // Ajusta la altura del iframe a su contenido (sin huecos)
+  let S = null, rawPrev = '', offset = null;
+  let player = null, ready = false, loadedToken = '', lastSeekAt = 0;
+  let needTap = false, seeking = false, endedSent = '', watchdog = null;
+  let listening = AUTO;
+  try { if (!AUTO && localStorage.getItem('mn_listen') === '1') listening = true; } catch (e) {}
+
+  root.classList.toggle('host', HOST);
+  root.classList.toggle('listening', listening);
+
+  // ---------- Utilidades ----------
   function fit() {
     try {
       const f = window.frameElement;
       if (!f) return;
-      const h = Math.ceil(document.getElementById('root').getBoundingClientRect().bottom + 14);
+      const h = Math.ceil(root.getBoundingClientRect().bottom + 14);
       if (Math.abs(f.offsetHeight - h) > 2) { f.style.height = h + 'px'; f.setAttribute('height', h); }
       const box = f.closest('[data-testid="stElementContainer"]');
       if (box && Math.abs(box.offsetHeight - h) > 2) box.style.height = h + 'px';
@@ -617,41 +727,61 @@ PLAYER_TEMPLATE = r"""
   }
   window.addEventListener('resize', fit);
 
-  let player = null, ready = false, loadedToken = '', endedFor = '', seeking = false;
-  let watchdog = null, userPaused = false, needTap = false;
+  const now = () => Date.now() / 1000;
+  const serverNow = () => now() - (offset || 0);
+  function targetPos(s) {
+    if (!s || !s.token) return 0;
+    let t = s.paused ? s.ppos : serverNow() - s.anchor;
+    if (s.dur) t = Math.min(t, s.dur);
+    return Math.max(0, t);
+  }
+  function fmt(sec) { sec = Math.floor(sec || 0); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
+  function paint(el, pct) { el.style.background = 'linear-gradient(to right, var(--accent) ' + pct + '%, #2c2c33 ' + pct + '%)'; }
 
-  root.classList.toggle('audio', AUDIO);
-  root.classList.toggle('host', HOST);
-
-  // ---------- Estado publicado por Streamlit ----------
-  function readState() {
-    const box = P.querySelector('.st-key-mn_state');
-    if (!box) return null;
-    const m = (box.textContent || '').match(/[A-Za-z0-9+\/=]{16,}/);
-    if (!m) return null;
+  function decode(raw) {
     try {
-      const bin = atob(m[0]);
+      const bin = atob(raw);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       return JSON.parse(new TextDecoder().decode(bytes));
     } catch (e) { return null; }
   }
-  function clickHidden(key) {
-    const b = P.querySelector('.st-key-' + key + ' button');
-    if (b) b.click();
-    setTimeout(sync, 500); setTimeout(sync, 1400);
+
+  // Envía una orden a Python escribiendo en un campo oculto de Streamlit
+  function sendCmd(cmd) {
+    const input = P.querySelector('.st-key-mn_cmd input');
+    if (!input) return;
+    cmd.n = Math.random().toString(36).slice(2);
+    const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, JSON.stringify(cmd));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
   }
 
-  function setSpin(on, paused) {
-    root.classList.toggle('spinning', on);
-    root.classList.toggle('paused', !!paused);
+  // ---------- Estado de la sala ----------
+  function poll() {
+    const box = P.querySelector('.st-key-mn_state');
+    if (!box) return;
+    const m = (box.textContent || '').match(/[A-Za-z0-9+\/=]{16,}/);
+    if (!m || m[0] === rawPrev) return;
+    rawPrev = m[0];
+    const s = decode(m[0]);
+    if (!s) return;
+    // Diferencia entre el reloj del servidor y el de este dispositivo
+    const off = now() - s.now;
+    offset = offset === null ? off : Math.min(off, offset + 0.02);
+    S = s;
+    applyUI();
+    follow();
   }
 
-  function applyUI(s) {
-    const has = !!s.vid;
+  function applyUI() {
+    const s = S, has = !!s.token;
     document.documentElement.style.setProperty('--accent', s.color || '#ff2222');
     root.classList.toggle('empty', !has);
-    $('eyebrow').textContent = has ? ('Sonando ahora · ' + s.pos + '/' + s.total) : 'MusicNow';
+    root.classList.toggle('spinning', has);
+    root.classList.toggle('paused', has && s.paused);
+    $('eyebrow').textContent = has ? ((s.paused ? 'En pausa · ' : 'Sonando ahora · ') + s.pos + '/' + s.total) : 'MusicNow';
     $('title').textContent = has ? s.title : (s.total ? 'La lista terminó' : 'Nada sonando todavía');
     $('artist').textContent = has ? s.artist : 'Busca una canción y empieza la fiesta';
     $('label').style.backgroundImage = has && s.thumb ? 'url(' + JSON.stringify(s.thumb) + ')' : '';
@@ -659,158 +789,199 @@ PLAYER_TEMPLATE = r"""
     $('upnext-title').textContent = s.next || '';
     $('prev').disabled = !s.can_prev;
     $('next').disabled = !s.can_next;
-    if (!AUDIO) setSpin(has, false);
+    $('play-icon').innerHTML = s.paused ? ICON_PLAY : ICON_PAUSE;
+    updateProgress();
     requestAnimationFrame(fit);
   }
 
-  function sync() {
-    const s = readState();
-    if (!s) return;
-    applyUI(s);
-    if (!AUDIO || !ready) return;
-    if (s.token && s.token !== loadedToken) {
-      loadedToken = s.token;
-      userPaused = false;
-      $('notice').textContent = '';
-      resetProgress();
-      player.loadVideoById(s.vid);
-      armWatchdog();
-    } else if (!s.token && loadedToken) {
-      loadedToken = '';
-      player.stopVideo();
-      setSpin(false, false);
-      resetProgress();
-      hideUnlock();
-    }
+  function updateProgress() {
+    if (!S || !S.token || seeking) return;
+    let dur = S.dur;
+    if (!dur && ready && listening && player.getDuration) dur = player.getDuration();
+    const pos = targetPos(S);
+    $('cur').textContent = fmt(pos);
+    $('dur').textContent = dur ? fmt(dur) : '--:--';
+    const pct = dur ? Math.min(100, (pos / dur) * 100) : 0;
+    $('progress').value = pct * 10;
+    paint($('progress'), pct);
   }
 
-  // ---------- YouTube (solo en el equipo que reproduce el audio) ----------
-  if (AUDIO) {
-    const tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
-    document.head.appendChild(tag);
-  }
+  // ---------- Reproductor de YouTube (se carga en todos los dispositivos) ----------
+  const tag = document.createElement('script');
+  tag.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
+
   window.onYouTubeIframeAPIReady = function () {
     player = new YT.Player('yt-player', {
       height: '200', width: '200',
       playerVars: { autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, playsinline: 1, iv_load_policy: 3 },
       events: {
-        onReady: () => { ready = true; player.setVolume(+$('volume').value); sync(); },
+        onReady: () => { ready = true; player.setVolume(+$('volume').value); follow(); },
         onStateChange: onState,
         onError: onError,
       },
     });
   };
 
-  function setPlaying(playing) {
-    setSpin(!!loadedToken, !playing);
-    $('play-icon').innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
+  // Mantiene este dispositivo alineado con el reloj del servidor
+  function follow() {
+    if (!player || !ready || !listening || !S) return;
+    const s = S;
+    if (!s.token) {
+      if (loadedToken) { loadedToken = ''; player.stopVideo(); hideUnlock(); }
+      return;
+    }
+    const t = targetPos(s);
+    if (s.token !== loadedToken) {
+      loadedToken = s.token;
+      endedSent = '';
+      $('notice').textContent = '';
+      player.loadVideoById({ videoId: s.vid, startSeconds: t });
+      lastSeekAt = now();
+      armWatchdog();
+      return;
+    }
+    if (needTap) return;
+    const st = player.getPlayerState();
+    if (s.paused) {
+      if (st === 1 || st === 3) player.pauseVideo();
+      return;
+    }
+    if (st === 0) return;  // terminó aquí; el servidor pasará a la siguiente
+    if (st === 2 || st === 5 || st === -1) {
+      player.seekTo(t, true);
+      player.playVideo();
+      lastSeekAt = now();
+      armWatchdog();
+      return;
+    }
+    if (st === 1 && now() - lastSeekAt > 4) {
+      const drift = player.getCurrentTime() - t;
+      if (Math.abs(drift) > 2.5 && !(s.dur && t >= s.dur - 1)) {
+        player.seekTo(t, true);
+        lastSeekAt = now();
+      }
+    }
   }
+
   function onState(e) {
-    const st = e.data;
-    if (st === 1) {
-      setPlaying(true);
-      if (!player.isMuted()) hideUnlock();
-    } else if (st === 0) {
-      setPlaying(false);
-      signalEnd('mn_ended');
-    } else if (st !== 3) {
-      setPlaying(false);
+    if (e.data === 1 && !player.isMuted()) hideUnlock();
+    if (e.data === 0 && S && S.token === loadedToken && endedSent !== loadedToken) {
+      endedSent = loadedToken;
+      sendCmd({ c: 'ended', tok: loadedToken });
     }
   }
   function onError() {
+    if (!loadedToken || endedSent === loadedToken) return;
     $('notice').textContent = '⚠️ Esta canción no se puede reproducir aquí. Saltando…';
-    setTimeout(() => signalEnd('mn_skip'), 1200);
-  }
-  function signalEnd(key) {
-    const s = readState();
-    if (!s || !loadedToken || s.token !== loadedToken || endedFor === loadedToken) return;
-    endedFor = loadedToken;
-    clickHidden(key);
+    endedSent = loadedToken;
+    const tok = loadedToken;
+    setTimeout(() => sendCmd({ c: 'skip', tok: tok }), 1200);
   }
 
-  // ---------- Política de autoplay (clave en PC) ----------
-  // Chrome/Edge/Firefox de escritorio bloquean el audio hasta que alguien
-  // interactúe con la página. Si eso pasa, arrancamos en silencio (permitido)
-  // y mostramos el botón; cualquier toque en la página activa el sonido.
+  // ---------- Política de autoplay del navegador ----------
   function armWatchdog() {
-    clearTimeout(watchdog);
+    if (watchdog) return;
     watchdog = setTimeout(() => {
-      if (!player || !loadedToken || userPaused) return;
+      watchdog = null;
+      if (!listening || !loadedToken || !S || S.paused) return;
       const st = player.getPlayerState();
-      if (st !== 1 && st !== 3) {
-        player.mute();
-        player.playVideo();
-        showUnlock();
-      } else if (player.isMuted()) {
-        showUnlock();
-      }
+      if (st !== 1 && st !== 3) { player.mute(); player.playVideo(); showUnlock(); }
+      else if (player.isMuted()) showUnlock();
     }, 2500);
   }
   function showUnlock() { needTap = true; $('unlock').classList.add('show'); }
   function hideUnlock() { needTap = false; $('unlock').classList.remove('show'); }
-  function unlockAudio() {
+
+  // Debe llamarse dentro de un toque/clic del usuario
+  function unlockAndPlay() {
     if (!player || !ready) return;
+    hideUnlock();
     player.unMute();
     player.setVolume(+$('volume').value);
-    if (loadedToken) { userPaused = false; player.playVideo(); }
-    hideUnlock();
+    if (!S || !S.token) return;
+    const t = targetPos(S);
+    if (S.token !== loadedToken) {
+      loadedToken = S.token;
+      endedSent = '';
+      player.loadVideoById({ videoId: S.vid, startSeconds: t });
+    } else {
+      player.seekTo(t, true);
+      if (!S.paused) player.playVideo();
+    }
+    lastSeekAt = now();
+    armWatchdog();
   }
-  function onAnyGesture() { if (AUDIO && needTap) unlockAudio(); }
-  ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
+
+  function setListening(on) {
+    listening = on;
+    try { localStorage.setItem('mn_listen', on ? '1' : '0'); } catch (e) {}
+    root.classList.toggle('listening', on);
+    $('listen-text').textContent = on ? 'Escuchando' : 'Escuchar aquí';
+    if (on) { unlockAndPlay(); }
+    else {
+      hideUnlock();
+      if (player && ready) player.stopVideo();
+      loadedToken = '';
+    }
+    requestAnimationFrame(fit);
+  }
+  $('listen-text').textContent = listening ? 'Escuchando' : 'Escuchar aquí';
+  $('listen').addEventListener('click', () => setListening(!listening));
+  $('unlock').addEventListener('click', (e) => { e.stopPropagation(); unlockAndPlay(); });
+
+  function onAnyGesture(e) {
+    if (listening && needTap && e.target !== $('listen') && !$('listen').contains(e.target)) unlockAndPlay();
+  }
+  ['pointerdown', 'keydown'].forEach((ev) => {
     document.addEventListener(ev, onAnyGesture, true);
     try { P.addEventListener(ev, onAnyGesture, true); } catch (e) {}
   });
-  $('unlock').addEventListener('click', unlockAudio);
 
-  // ---------- Controles ----------
+  // ---------- Controles del admin ----------
   function togglePlay() {
-    if (!AUDIO || !player || !player.getPlayerState || !loadedToken) return;
-    const st = player.getPlayerState();
-    if ((st === 1 || st === 3) && !player.isMuted()) { userPaused = true; player.pauseVideo(); }
-    else { unlockAudio(); }
+    if (!HOST || !S || !S.token) return;
+    if (S.paused) {
+      sendCmd({ c: 'play' });
+      if (listening && player && ready) { player.unMute(); player.seekTo(targetPos(S), true); player.playVideo(); lastSeekAt = now(); }
+    } else {
+      sendCmd({ c: 'pause' });
+      if (listening && player && ready) player.pauseVideo();
+    }
   }
   $('play').addEventListener('click', togglePlay);
-  $('vinyl').addEventListener('click', togglePlay);
-  $('prev').addEventListener('click', () => clickHidden('mn_prev'));
-  $('next').addEventListener('click', () => clickHidden('mn_next'));
-
-  function fmt(sec) { sec = Math.floor(sec || 0); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
-  function paint(el, pct) { el.style.background = 'linear-gradient(to right, var(--accent) ' + pct + '%, #2c2c33 ' + pct + '%)'; }
-  function resetProgress() { $('progress').value = 0; paint($('progress'), 0); $('cur').textContent = '0:00'; $('dur').textContent = '0:00'; }
+  $('vinyl').addEventListener('click', () => { if (HOST) togglePlay(); else if (!listening) setListening(true); });
+  $('prev').addEventListener('click', () => sendCmd({ c: 'prev' }));
+  $('next').addEventListener('click', () => sendCmd({ c: 'next' }));
 
   $('progress').addEventListener('input', (e) => {
+    if (!HOST || !S) return;
     seeking = true;
     paint(e.target, e.target.value / 10);
-    if (player && player.getDuration) $('cur').textContent = fmt(e.target.value / 1000 * player.getDuration());
+    const dur = S.dur || (player && player.getDuration ? player.getDuration() : 0);
+    $('cur').textContent = fmt(e.target.value / 1000 * dur);
   });
   $('progress').addEventListener('change', (e) => {
-    if (player && player.getDuration) {
-      const d = player.getDuration();
-      if (d > 0) player.seekTo(e.target.value / 1000 * d, true);
+    if (!HOST || !S) return;
+    const dur = S.dur || (player && player.getDuration ? player.getDuration() : 0);
+    if (dur > 0) {
+      const t = e.target.value / 1000 * dur;
+      sendCmd({ c: 'seek', t: t });
+      if (listening && player && ready) { player.seekTo(t, true); lastSeekAt = now(); }
     }
     seeking = false;
   });
+
   $('volume').addEventListener('input', (e) => {
     if (player && player.setVolume) { player.setVolume(+e.target.value); if (+e.target.value > 0) player.unMute(); }
     paint(e.target, e.target.value);
   });
   paint($('volume'), 100);
 
-  setInterval(() => {
-    if (!AUDIO || !ready || !loadedToken || seeking || !player.getDuration) return;
-    const cur = player.getCurrentTime(), dur = player.getDuration();
-    if (dur > 0) {
-      const pct = (cur / dur) * 100;
-      $('progress').value = pct * 10;
-      paint($('progress'), pct);
-      $('cur').textContent = fmt(cur);
-      $('dur').textContent = fmt(dur);
-    }
-  }, 500);
-
-  setInterval(sync, 1000);
-  sync();
+  setInterval(poll, 250);
+  setInterval(updateProgress, 500);
+  setInterval(follow, 1000);
+  poll();
 </script>
 </body>
 </html>
@@ -822,19 +993,14 @@ PLAYER_TEMPLATE = r"""
 # =========================================================
 @st.fragment(run_every=REFRESCO_ESTADO)
 def canal_estado():
-    """Publica el estado (oculto) y los botones que el reproductor pulsa."""
+    """Canal oculto: publica el estado y recibe órdenes del reproductor."""
+    room.tick()
     with st.container(key="mn_state"):
         st.text(estado_codificado())
-    if AUDIO_AQUI:
-        st.button("ended", key="mn_ended", on_click=room.cancion_terminada)
-        st.button("skip", key="mn_skip", on_click=room.cancion_fallida)
-    if ES_HOST:
-        st.button("prev", key="mn_prev", on_click=room.anterior)
-        st.button("next", key="mn_next", on_click=room.siguiente)
+    st.text_input("cmd", key="mn_cmd", label_visibility="collapsed", on_change=on_cmd, args=(ES_HOST,))
 
 
 def fila(key: str, cancion: dict, numero: int | None = None, acciones=()):
-    """Fila compacta: carátula · título/artista · hasta dos botones de acción."""
     with st.container(key=key):
         cols = st.columns([1, 6] + [1] * max(1, len(acciones)), vertical_alignment="center")
         with cols[0]:
@@ -861,7 +1027,7 @@ def fila(key: str, cancion: dict, numero: int | None = None, acciones=()):
 
 @st.fragment(run_every=REFRESCO_COLA)
 def panel_cola():
-    playlist, idx, terminado, _ = room.snapshot()
+    playlist, idx, terminado = room.snapshot()
     sonando = not terminado and 0 <= idx < len(playlist)
     proximas = playlist[idx + 1:] if sonando else []
     historial = playlist[:idx] if sonando else playlist
@@ -874,9 +1040,9 @@ def panel_cola():
         st.markdown("<div class='mn-empty'>No hay canciones en espera. ¡Pide la próxima! 🎶</div>",
                     unsafe_allow_html=True)
 
-    def acciones_de(c, permitir_play=True):
+    def acciones_de(c):
         acc = []
-        if ES_HOST and permitir_play:
+        if ES_HOST:
             acc.append((":material/play_arrow:", "Reproducir ahora", room.reproducir, (c["uid"],), False))
         if ES_HOST or c.get("added_by") == GUEST_ID:
             acc.append((":material/close:", "Quitar", room.eliminar, (c["uid"],), False))
@@ -912,13 +1078,12 @@ st.session_state.setdefault("current_query", "")
 st.markdown("<h1 class='mn-title'>MusicNow</h1>", unsafe_allow_html=True)
 st.markdown("<p class='mn-sub'>Busca una canción y añádela a la lista</p>", unsafe_allow_html=True)
 
-# Reproductor: HTML constante por dispositivo → el iframe no se recarga
-alto_player = 540 if AUDIO_AQUI else 430  # el iframe se ajusta solo a su contenido
+# HTML constante por dispositivo → el iframe nunca se recarga y la música no se corta
 incrustar_html(
     PLAYER_TEMPLATE
-    .replace("__AUDIO__", "true" if AUDIO_AQUI else "false")
-    .replace("__HOST__", "true" if ES_HOST else "false"),
-    alto_player,
+    .replace("__HOST__", "true" if ES_HOST else "false")
+    .replace("__AUTO__", "true" if AUTO_AUDIO else "false"),
+    540 if ES_HOST else 480,
 )
 canal_estado()
 
@@ -977,7 +1142,8 @@ if st.session_state.current_query:
             ya = r["video_id"] in en_cola
             fila(
                 f"li-r-{r['video_id']}", r,
-                acciones=[(":material/check:" if ya else ":material/add:", "Ya está en la lista" if ya else "Agregar",
+                acciones=[(":material/check:" if ya else ":material/add:",
+                           "Ya está en la lista" if ya else "Agregar",
                            on_agregar, (r, GUEST_ID, ES_HOST), ya)],
             )
     st.button("Cerrar resultados", key="btn_cerrar", on_click=on_cerrar_resultados)
@@ -1047,7 +1213,6 @@ SHARE_TEMPLATE = r"""
   </div>
 <script>
   const URL_APP = __URL_JSON__;
-  // Ajusta la altura del iframe a su contenido (sin huecos)
   function fit() {
     try {
       const f = window.frameElement;
@@ -1088,27 +1253,27 @@ incrustar_html(
 
 
 # =========================================================
-# ANFITRIÓN (discreto, al pie)
+# ADMIN (discreto, al pie)
 # =========================================================
 with st.container(key="host_area"):
-    with st.popover("🎛️ Anfitrión · activo" if ES_HOST else "🎛️ Soy el anfitrión"):
+    with st.popover("🎛️ Admin · activo" if ES_HOST else "🎛️ Soy el admin"):
         if ES_HOST:
-            audio = st.toggle("🔊 Reproducir la música en este equipo", value=AUDIO_AQUI,
-                              help="Actívalo en el PC o Smart TV conectado a los parlantes. "
-                                   "Desactívalo si usas tu teléfono solo como control.")
-            if audio != AUDIO_AQUI:
-                st.query_params["audio"] = "1" if audio else "0"
+            auto = st.toggle("🔊 Reproducir automáticamente en este equipo", value=AUTO_AUDIO,
+                             help="Actívalo en el PC o Smart TV conectado a los parlantes. "
+                                  "Desactívalo si usas tu teléfono solo como control remoto.")
+            if auto != AUTO_AUDIO:
+                st.query_params["audio"] = "1" if auto else "0"
                 st.rerun()
             st.caption("Si el navegador bloquea el audio, toca el vinilo o cualquier parte de la página una vez.")
             if PIN_POR_DEFECTO:
                 st.warning("Estás usando el PIN por defecto. Define `HOST_PIN` en los Secrets de la app.")
-            if st.button("Salir del modo anfitrión", width="stretch"):
+            if st.button("Salir del modo admin", width="stretch"):
                 for clave in ("host", "audio"):
                     if clave in st.query_params:
                         del st.query_params[clave]
                 st.rerun()
         else:
-            st.caption("Para el equipo que pone la música (PC, Smart TV) o quien controla la fiesta.")
+            st.caption("Solo para quien controla la fiesta.")
             with st.form("host_form", border=False):
                 pin = st.text_input("PIN", type="password")
                 if st.form_submit_button("Entrar", width="stretch"):
