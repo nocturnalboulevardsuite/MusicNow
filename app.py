@@ -50,10 +50,11 @@ PIN_POR_DEFECTO = HOST_PIN == "1234"
 
 # Súbelo cada vez que cambies la clase PartyRoom: obliga a Streamlit a crear
 # una sala nueva en vez de reutilizar la antigua guardada en caché.
-ROOM_VERSION = 3
+ROOM_VERSION = 4
 
 COOLDOWN_SECONDS = 120
 MAX_RESULTADOS = 5
+MAX_ALTERNATIVAS = 4  # versiones de respaldo por canción (para celulares)
 MAX_COLA = 100
 REFRESCO_ESTADO = "2s"
 REFRESCO_COLA = "3s"
@@ -162,6 +163,7 @@ class PartyRoom:
                 "thumb": actual["thumbnail"] if actual else "",
                 "color": actual["color"] if actual else "#ff2222",
                 "dur": actual.get("dur", 0) if actual else 0,
+                "alts": actual.get("alts", []) if actual else [],
                 "pos": idx + 1,
                 "total": total,
                 "next": siguiente,
@@ -249,8 +251,8 @@ class PartyRoom:
                 if c == "ended":
                     if pos < GUARDIA_FIN_SEG or (dur and pos < dur - 10 and not es_host):
                         return
-                elif not es_host and pos > 20:
-                    return
+                elif not es_host:
+                    return  # un invitado que no puede reproducir NO salta la canción a todos
                 self._avanzar()
                 return
 
@@ -372,12 +374,52 @@ def buscar_canciones(consulta: str):
     return resultados
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def buscar_alternativas(titulo: str, artista: str, video_id: str, dur: int) -> list[str]:
+    """Otras versiones del mismo tema (audio oficial, video, lyric...).
+    Muchos videos tienen la reproducción incrustada bloqueada en celulares;
+    si una falla, el reproductor del teléfono prueba la siguiente."""
+    yt = get_ytmusic()
+    if yt is None:
+        return []
+    if artista in ("Artista desconocido",):
+        artista = ""
+    consulta = f"{titulo} {artista}".strip()
+    alternativas, vistos = [], {video_id}
+    for filtro in ("songs", "videos", None):
+        try:
+            crudos = (yt.search(consulta, filter=filtro, limit=8) if filtro
+                      else yt.search(consulta, limit=8)) or []
+        except Exception:
+            crudos = []
+        for item in crudos:
+            vid = item.get("videoId")
+            if not vid or vid in vistos:
+                continue
+            if item.get("resultType") not in (None, "song", "video"):
+                continue
+            vistos.add(vid)
+            d = a_segundos(item)
+            if dur and d and abs(d - dur) > max(25, dur * 0.12):
+                continue  # duración muy distinta: probablemente otra canción
+            alternativas.append(vid)
+            if len(alternativas) >= MAX_ALTERNATIVAS:
+                return alternativas
+    return alternativas
+
+
 # =========================================================
 # CALLBACKS
 # =========================================================
 def on_agregar(resultado: dict, invitado: str, es_host: bool):
+    try:
+        alts = buscar_alternativas(resultado["title"], resultado["artist"],
+                                   resultado["video_id"], int(resultado.get("dur") or 0))
+    except Exception:  # noqa: BLE001
+        alts = []
     cancion = {
         **resultado,
+        "alts": alts,
         "uid": uuid.uuid4().hex,
         "color": random.choice(COLORES),
         "added_by": invitado,
@@ -532,6 +574,7 @@ PLAYER_TEMPLATE = r"""
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -645,15 +688,21 @@ PLAYER_TEMPLATE = r"""
   .upnext { margin-top: 16px; font-size: 0.76rem; color: #6f6f7a; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .upnext b { color: #b5b5bf; font-weight: 600; }
   .notice { margin-top: 8px; font-size: 0.76rem; color: #ffb020; min-height: 1em; }
+  .open-yt {
+    display: none; margin-top: 8px; padding: 7px 14px; border-radius: 999px; text-decoration: none;
+    font-size: 0.76rem; font-weight: 600; color: #fff; background: #26262c; border: 1px solid rgba(255,255,255,0.14);
+  }
+  .open-yt.show { display: inline-flex; }
 
   .empty .progress, .empty .controls, .empty .listen-row, .empty .upnext { display: none !important; }
   .wrap:not(.host) .controls { display: none !important; }
 
-  #yt { position: fixed; left: 0; top: 0; width: 200px; height: 200px; opacity: 0.001; pointer-events: none; z-index: -1; }
+  #yt { position: fixed; left: 0; top: 0; width: 200px; height: 200px; opacity: 0.01; pointer-events: none; z-index: -1; }
+  #yt iframe { width: 200px; height: 200px; border: 0; }
 </style>
 </head>
 <body>
-<div id="yt"><div id="yt-player"></div></div>
+<div id="yt"></div>
 
 <div id="root" class="wrap empty">
   <div class="stage">
@@ -695,6 +744,7 @@ PLAYER_TEMPLATE = r"""
 
   <div id="upnext" class="upnext">A continuación · <b id="upnext-title"></b></div>
   <div id="notice" class="notice"></div>
+  <a id="open-yt" class="open-yt" href="#" target="_blank" rel="noopener">Abrir en YouTube ↗</a>
 </div>
 
 <script>
@@ -708,6 +758,7 @@ PLAYER_TEMPLATE = r"""
   let S = null, rawPrev = '', offset = null;
   let player = null, ready = false, loadedToken = '', lastSeekAt = 0;
   let needTap = false, seeking = false, endedSent = '', watchdog = null;
+  let curVid = '', tried = new Set(), retried = false, gaveUp = false, noticeKind = '';
   let listening = AUTO;
   try { if (!AUTO && localStorage.getItem('mn_listen') === '1') listening = true; } catch (e) {}
 
@@ -806,15 +857,44 @@ PLAYER_TEMPLATE = r"""
     paint($('progress'), pct);
   }
 
+  // ---------- Avisos ----------
+  function setNotice(text, kind, showLink) {
+    noticeKind = text ? (kind || 'info') : '';
+    $('notice').textContent = text || '';
+    $('open-yt').classList.toggle('show', !!showLink);
+    requestAnimationFrame(fit);
+  }
+  $('open-yt').addEventListener('click', (e) => {
+    if (!S || !S.vid) { e.preventDefault(); return; }
+    // Abre la app/web de YouTube en el segundo exacto en que va la fiesta
+    e.currentTarget.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(S.vid) +
+                           '&t=' + Math.floor(targetPos(S)) + 's';
+  });
+
   // ---------- Reproductor de YouTube (se carga en todos los dispositivos) ----------
+  // Se crea el iframe a mano con origin + referrer: en celulares YouTube rechaza
+  // (errores 101/150/152/153) los reproductores incrustados que no los envían.
+  const ORIGIN = (() => {
+    try { const o = window.parent.location.origin; if (o && o !== 'null') return o; } catch (e) {}
+    try { if (location.origin && location.origin !== 'null') return location.origin; } catch (e) {}
+    return '';
+  })();
+  const ytFrame = document.createElement('iframe');
+  ytFrame.id = 'yt-player';
+  ytFrame.width = '200'; ytFrame.height = '200';
+  ytFrame.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
+  ytFrame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+  ytFrame.setAttribute('title', 'Reproductor');
+  ytFrame.src = 'https://www.youtube.com/embed/?enablejsapi=1&autoplay=1&controls=0&disablekb=1&fs=0&rel=0' +
+                '&playsinline=1&iv_load_policy=3' + (ORIGIN ? '&origin=' + encodeURIComponent(ORIGIN) : '');
+  $('yt').appendChild(ytFrame);
+
   const tag = document.createElement('script');
   tag.src = 'https://www.youtube.com/iframe_api';
   document.head.appendChild(tag);
 
   window.onYouTubeIframeAPIReady = function () {
     player = new YT.Player('yt-player', {
-      height: '200', width: '200',
-      playerVars: { autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, playsinline: 1, iv_load_policy: 3 },
       events: {
         onReady: () => { ready = true; player.setVolume(+$('volume').value); follow(); },
         onStateChange: onState,
@@ -832,16 +912,8 @@ PLAYER_TEMPLATE = r"""
       return;
     }
     const t = targetPos(s);
-    if (s.token !== loadedToken) {
-      loadedToken = s.token;
-      endedSent = '';
-      $('notice').textContent = '';
-      player.loadVideoById({ videoId: s.vid, startSeconds: t });
-      lastSeekAt = now();
-      armWatchdog();
-      return;
-    }
-    if (needTap) return;
+    if (s.token !== loadedToken) { startTrack(s, t); return; }
+    if (needTap || gaveUp) return;
     const st = player.getPlayerState();
     if (s.paused) {
       if (st === 1 || st === 3) player.pauseVideo();
@@ -864,19 +936,70 @@ PLAYER_TEMPLATE = r"""
     }
   }
 
+  // Carga una canción nueva (versión principal primero)
+  function startTrack(s, t) {
+    loadedToken = s.token;
+    endedSent = '';
+    curVid = s.vid;
+    tried = new Set();
+    retried = false;
+    gaveUp = false;
+    setNotice('');
+    player.loadVideoById({ videoId: curVid, startSeconds: t });
+    lastSeekAt = now();
+    armWatchdog();
+  }
+
   function onState(e) {
+    if (e.data === 1 && noticeKind === 'trying') setNotice('');
     if (e.data === 1 && !player.isMuted()) hideUnlock();
     if (e.data === 0 && S && S.token === loadedToken && endedSent !== loadedToken) {
       endedSent = loadedToken;
       sendCmd({ c: 'ended', tok: loadedToken });
     }
   }
-  function onError() {
-    if (!loadedToken || endedSent === loadedToken) return;
-    $('notice').textContent = '⚠️ Esta canción no se puede reproducir aquí. Saltando…';
-    endedSent = loadedToken;
+  // Si un video falla (muy común en celulares por restricciones del dueño),
+  // se prueban otras versiones del mismo tema SOLO en este dispositivo.
+  function onError(e) {
+    if (!loadedToken || !S || S.token !== loadedToken || gaveUp || endedSent === loadedToken) return;
+    const code = e && e.data;
     const tok = loadedToken;
-    setTimeout(() => sendCmd({ c: 'skip', tok: tok }), 1200);
+
+    // Error 5 (fallo interno del reproductor HTML5): suele arreglarse reintentando
+    if (code === 5 && !retried) {
+      retried = true;
+      setTimeout(() => {
+        if (S && S.token === tok && !gaveUp) {
+          player.loadVideoById({ videoId: curVid, startSeconds: targetPos(S) });
+          lastSeekAt = now();
+        }
+      }, 800);
+      return;
+    }
+
+    tried.add(curVid);
+    const next = [S.vid].concat(S.alts || []).find((v) => v && !tried.has(v));
+    if (next) {
+      curVid = next;
+      retried = false;
+      setNotice('Buscando una versión compatible con este dispositivo…', 'trying');
+      player.loadVideoById({ videoId: next, startSeconds: targetPos(S) });
+      lastSeekAt = now();
+      armWatchdog();
+      return;
+    }
+
+    // Ninguna versión funciona aquí
+    gaveUp = true;
+    hideUnlock();
+    if (HOST && AUTO) {
+      // El equipo principal del admin (el de los parlantes) sí salta la canción
+      setNotice('⚠️ Esta canción no se puede reproducir. Saltando…', 'error');
+      endedSent = tok;
+      setTimeout(() => sendCmd({ c: 'skip', tok: tok }), 1200);
+    } else {
+      setNotice('⚠️ Esta canción no se puede reproducir en este dispositivo. Puedes abrirla en YouTube:', 'error', true);
+    }
   }
 
   // ---------- Política de autoplay del navegador ----------
@@ -902,10 +1025,10 @@ PLAYER_TEMPLATE = r"""
     if (!S || !S.token) return;
     const t = targetPos(S);
     if (S.token !== loadedToken) {
-      loadedToken = S.token;
-      endedSent = '';
-      player.loadVideoById({ videoId: S.vid, startSeconds: t });
+      startTrack(S, t);
+      return;
     } else {
+      if (gaveUp) return;
       player.seekTo(t, true);
       if (!S.paused) player.playVideo();
     }
@@ -923,6 +1046,8 @@ PLAYER_TEMPLATE = r"""
       hideUnlock();
       if (player && ready) player.stopVideo();
       loadedToken = '';
+      gaveUp = false;
+      setNotice('');
     }
     requestAnimationFrame(fit);
   }
