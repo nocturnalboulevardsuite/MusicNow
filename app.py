@@ -53,7 +53,8 @@ PIN_POR_DEFECTO = HOST_PIN == "1234"
 ROOM_VERSION = 4
 
 COOLDOWN_SECONDS = 120
-MAX_RESULTADOS = 5
+MAX_RESULTADOS = 10
+ALTO_RESULTADOS = 340  # alto (px) del mini scroll de resultados
 MAX_ALTERNATIVAS = 4  # versiones de respaldo por canción (para celulares)
 MAX_COLA = 100
 REFRESCO_ESTADO = "2s"
@@ -433,6 +434,7 @@ def on_agregar(resultado: dict, invitado: str, es_host: bool):
 
 def on_cerrar_resultados():
     st.session_state.current_query = ""
+    st.session_state.search_input = ""  # también limpia la barra de búsqueda
 
 
 def on_limpiar_confirmado():
@@ -525,6 +527,19 @@ h1.mn-title a, [data-testid="stHeaderActionElements"] { display: none !important
     color: #fff !important; font-weight: 700 !important; box-shadow: 0 0 12px rgba(255, 34, 34, 0.35) !important;
 }
 .st-key-search_box button:hover { background: #ff4545 !important; box-shadow: 0 0 18px rgba(255, 34, 34, 0.6) !important; }
+
+/* ---------- Mini scroll de resultados ---------- */
+.st-key-results_scroll {
+    background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07) !important;
+    border-radius: 16px; padding: 4px 2px 10px 0 !important;
+    overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 34, 34, 0.6) transparent;
+}
+.st-key-results_scroll::-webkit-scrollbar, .st-key-results_scroll *::-webkit-scrollbar { width: 6px; }
+.st-key-results_scroll::-webkit-scrollbar-track, .st-key-results_scroll *::-webkit-scrollbar-track { background: transparent; }
+.st-key-results_scroll::-webkit-scrollbar-thumb, .st-key-results_scroll *::-webkit-scrollbar-thumb {
+    background: rgba(255, 34, 34, 0.55); border-radius: 999px;
+}
+.st-key-results_scroll::-webkit-scrollbar-thumb:hover, .st-key-results_scroll *::-webkit-scrollbar-thumb:hover { background: #ff2222; }
 
 /* ---------- Botones fantasma ---------- */
 .stButton button, div[data-testid="stPopover"] > div > button {
@@ -1214,11 +1229,13 @@ canal_estado()
 
 # ---------- Buscador ----------
 with st.container(key="search_box"):
-    with st.form(key="search_form", border=False, clear_on_submit=True):
+    # clear_on_submit=False + key → el texto buscado se queda escrito en la barra
+    with st.form(key="search_form", border=False, clear_on_submit=False):
         c_in, c_btn = st.columns([4, 1], vertical_alignment="center")
         with c_in:
             consulta = st.text_input("Búsqueda", placeholder="Canción, artista o género…",
-                                     label_visibility="collapsed", max_chars=100)
+                                     label_visibility="collapsed", max_chars=100,
+                                     key="search_input")
         with c_btn:
             buscar = st.form_submit_button("Buscar", width="stretch")
 if buscar and consulta.strip():
@@ -1244,15 +1261,17 @@ if not ES_HOST and not aviso_mostrado:
 # ---------- Resultados ----------
 if st.session_state.current_query:
     q = st.session_state.current_query
-    st.markdown(
-        f"<div class='mn-section'><span>Resultados</span><em>«{html.escape(q)}»</em></div>",
-        unsafe_allow_html=True,
-    )
     with st.spinner("Buscando…"):
         try:
             resultados, error = buscar_canciones(q), None
         except Exception as e:  # noqa: BLE001
             resultados, error = [], str(e)
+
+    cantidad = f" · {len(resultados)}" if resultados else ""
+    st.markdown(
+        f"<div class='mn-section'><span>Resultados{cantidad}</span><em>«{html.escape(q)}»</em></div>",
+        unsafe_allow_html=True,
+    )
 
     if error:
         st.markdown(f"<div class='mn-empty'>Error al buscar: {html.escape(error)}</div>", unsafe_allow_html=True)
@@ -1263,14 +1282,16 @@ if st.session_state.current_query:
         st.markdown("<div class='mn-empty'>Sin resultados para tu búsqueda.</div>", unsafe_allow_html=True)
     else:
         en_cola = room.ids_pendientes()
-        for r in resultados:
-            ya = r["video_id"] in en_cola
-            fila(
-                f"li-r-{r['video_id']}", r,
-                acciones=[(":material/check:" if ya else ":material/add:",
-                           "Ya está en la lista" if ya else "Agregar",
-                           on_agregar, (r, GUEST_ID, ES_HOST), ya)],
-            )
+        # Mini scroll: muestra hasta 10 resultados dentro de una caja desplazable
+        with st.container(height=ALTO_RESULTADOS, border=False, key="results_scroll"):
+            for r in resultados:
+                ya = r["video_id"] in en_cola
+                fila(
+                    f"li-r-{r['video_id']}", r,
+                    acciones=[(":material/check:" if ya else ":material/add:",
+                               "Ya está en la lista" if ya else "Agregar",
+                               on_agregar, (r, GUEST_ID, ES_HOST), ya)],
+                )
     st.button("Cerrar resultados", key="btn_cerrar", on_click=on_cerrar_resultados)
 
 # ---------- Cola ----------
