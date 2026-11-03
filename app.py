@@ -1500,21 +1500,24 @@ PLAYER_TEMPLATE = r"""
 
     // ---- Tropiezo del reproductor: reintentar el MISMO video ----
     if (!BLOCKED.has(code)) {
-      softErrors++;
       recovering = true;
-      if (softErrors <= 2) {
+      // Mientras el verificador de resultados trabaja, los tropiezos no cuentan
+      let probing = false;
+      try { probing = !!window.parent.__mnProbing; } catch (err) {}
+      if (!probing) softErrors++;
+      if (probing || softErrors <= 3) {
         setTimeout(() => {
           recovering = false;
-          if (S && S.token === tok && !gaveUp) {
+          if (S && S.token === tok && !gaveUp && ready) {
             player.loadVideoById({ videoId: curVid, startSeconds: targetPos(S) });
             lastSeekAt = now();
             armWatchdog();
           }
-        }, 1200 * softErrors);
+        }, probing ? 3000 : 1500 * softErrors);
       } else if (!rebuilt) {
-        rebuilt = true;  // reproductor nuevo desde cero (una vez por canción)
-        setNotice('Reiniciando el reproductor…', 'trying');
-        setTimeout(() => { recovering = false; softErrors = 0; buildPlayer(); }, 800);
+        rebuilt = true;  // reproductor nuevo desde cero (una sola vez por canción)
+        setNotice('Reconectando el reproductor…', 'trying');
+        setTimeout(() => { recovering = false; softErrors = 0; buildPlayer(); }, 1000);
       } else {
         recovering = false;
         tried.add(curVid);  // tampoco funcionó así: se prueba otra versión
@@ -1587,7 +1590,7 @@ PLAYER_TEMPLATE = r"""
     } else if (BLOCKED.has(code)) {
       setNotice('Esta canción no está disponible en este teléfono; vuelve con la siguiente.', 'error');
     } else {
-      setNotice('El reproductor tuvo un problema. Toca el vinilo para reintentar.', 'error');
+      setNotice('No se pudo reproducir (código ' + code + '). Toca el vinilo para reintentar.', 'error');
     }
   }
 
@@ -1596,7 +1599,7 @@ PLAYER_TEMPLATE = r"""
     if (watchdog) return;
     watchdog = setTimeout(() => {
       watchdog = null;
-      if (!listening || !loadedToken || !S || S.paused) return;
+      if (!listening || !loadedToken || !S || S.paused || gaveUp || recovering || waitingMore) return;
       const st = player.getPlayerState();
       if (st !== 1 && st !== 3) { player.mute(); player.playVideo(); showUnlock(); }
       else if (player.isMuted()) showUnlock();
@@ -1745,7 +1748,7 @@ PROBE_TEMPLATE = r"""
   const ROWS = __ROWS__;
   const P = window.parent.document;
   const MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
-  const WORKERS = MOBILE ? 1 : 2, TIMEOUT_MS = 8000, TTL_MS = 24 * 3600 * 1000;
+  const WORKERS = 2, TIMEOUT_MS = 7000, TTL_MS = 24 * 3600 * 1000;
   const msg = document.getElementById('msg');
 
   // ---------- Caché local por dispositivo: vid → [1 ok | 0 bloqueado, fecha] ----------
@@ -1835,17 +1838,23 @@ PROBE_TEMPLATE = r"""
   function makeWorker(n) {
     const f = document.createElement('iframe');
     f.id = 'probe' + n;
-    f.setAttribute('allow', 'autoplay; encrypted-media');
+    f.setAttribute('allow', 'encrypted-media');
     f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-    f.src = 'https://www.youtube.com/embed/?enablejsapi=1&autoplay=1&mute=1&controls=0&disablekb=1&fs=0&rel=0' +
+    f.src = 'https://www.youtube.com/embed/?enablejsapi=1&mute=1&controls=0&disablekb=1&fs=0&rel=0' +
             '&playsinline=1&iv_load_policy=3' + (ORIGIN ? '&origin=' + encodeURIComponent(ORIGIN) : '');
     document.getElementById('pool').appendChild(f);
-    const w = { player: null, job: null, vid: '', timer: null, busy: false };
+    const w = { player: null, job: null, vid: '', timer: null, okTimer: null, busy: false };
     if (closed) return;
     w.player = new YT.Player(f.id, {
       events: {
         onReady: () => { try { w.player.mute(); } catch (e) {} next(w); },
-        onStateChange: (e) => { if (w.busy && (e.data === 1)) result(w, true); },
+        // 5 = "video preparado": YouTube aceptó cargarlo en este dispositivo.
+        // Se espera un instante por si llega un error de bloqueo justo después.
+        onStateChange: (e) => {
+          if (!w.busy) return;
+          if (e.data === 5) { clearTimeout(w.okTimer); w.okTimer = setTimeout(() => result(w, true), 900); }
+          else if (e.data === 1 || e.data === 3) result(w, true);
+        },
         onError: (e) => {
           if (!w.busy) return;
           const code = e && e.data;
@@ -1864,7 +1873,8 @@ PROBE_TEMPLATE = r"""
   function shutdown() {
     if (closed) return;
     closed = true;
-    workers.forEach((w) => { clearTimeout(w.timer); try { w.player.destroy(); } catch (e) {} });
+    try { window.parent.__mnProbing = false; } catch (e) {}
+    workers.forEach((w) => { clearTimeout(w.timer); clearTimeout(w.okTimer); try { w.player.destroy(); } catch (e) {} });
     document.getElementById('pool').innerHTML = '';
   }
 
@@ -1872,6 +1882,7 @@ PROBE_TEMPLATE = r"""
     if (!w.busy || closed) return;
     w.busy = false;
     clearTimeout(w.timer);
+    clearTimeout(w.okTimer);
     try { w.player.stopVideo(); } catch (e) {}
     const job = w.job, vid = w.vid;
     if (ok === true) {
@@ -1893,7 +1904,7 @@ PROBE_TEMPLATE = r"""
     w.job = job;
     w.vid = job.vids[job.i];
     w.busy = true;
-    try { w.player.mute(); w.player.loadVideoById({ videoId: w.vid, startSeconds: 30 }); }
+    try { w.player.cueVideoById({ videoId: w.vid }); }
     catch (e) { result(w, null); return; }
     clearTimeout(w.timer);
     w.timer = setTimeout(() => result(w, null), TIMEOUT_MS);
@@ -1914,7 +1925,13 @@ PROBE_TEMPLATE = r"""
   }
   paintRows();
 
+  if (!queue.length) shutdown();
   if (queue.length) {
+    try { window.parent.__mnProbing = true; } catch (e) {}
+    // Nunca queda "verificando" para siempre
+    setTimeout(() => { queue.splice(0).forEach((job) => finishRow(job, 'ok'));
+                       ROWS.forEach((r) => { if (rowState[r.k] === 'pending') rowState[r.k] = 'ok'; });
+                       paintRows(); shutdown(); }, 45000);
     window.onYouTubeIframeAPIReady = () => {
       for (let n = 0; n < Math.min(WORKERS, queue.length); n++) makeWorker(n);
     };
