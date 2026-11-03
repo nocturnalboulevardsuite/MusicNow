@@ -449,7 +449,7 @@ def a_numero(valor) -> float:
 def _memoria() -> dict:
     """Vive mientras la app esté encendida (las variables normales del script
     se reinician en cada recarga de Streamlit)."""
-    return {"lock": threading.Lock(), "embed": {}, "malos_movil": {}}
+    return {"lock": threading.Lock(), "embed": {}, "malos_movil": {}, "buenos_movil": {}}
 
 
 MEM = _memoria()  # se usa también desde hilos en segundo plano
@@ -462,10 +462,28 @@ def malos_en_movil() -> set[str]:
         return {v for v, t in mem["malos_movil"].items() if t > limite}
 
 
+def buenos_en_movil() -> set[str]:
+    """Videos que un celular ya reprodujo bien (comprobado en el propio teléfono)."""
+    mem, limite = MEM, time.time() - 24 * 3600
+    with mem["lock"]:
+        return {v for v, t in mem["buenos_movil"].items() if t > limite}
+
+
+def registrar_buenos(vids, movil: bool):
+    with MEM["lock"]:
+        for vid in list(vids or [])[:60]:
+            if not isinstance(vid, str) or not re.fullmatch(r"[\w-]{11}", vid):
+                continue
+            MEM["embed"][vid] = (time.time(), True)
+            if movil:
+                MEM["buenos_movil"][vid] = time.time()
+                MEM["malos_movil"].pop(vid, None)
+
+
 def registrar_fallos(fallos: dict, movil: bool):
     mem = MEM
     with mem["lock"]:
-        for vid, codigo in list(fallos.items())[:12]:
+        for vid, codigo in list(fallos.items())[:60]:
             if not isinstance(vid, str) or not re.fullmatch(r"[\w-]{11}", vid):
                 continue
             try:
@@ -475,6 +493,7 @@ def registrar_fallos(fallos: dict, movil: bool):
             if codigo in (100, 101, 150):
                 if movil:
                     mem["malos_movil"][vid] = time.time()
+                    mem["buenos_movil"].pop(vid, None)
                 else:
                     mem["embed"][vid] = (time.time(), False)
 
@@ -663,10 +682,11 @@ def buscar_canciones(consulta: str):
             sumar(item, None, 40 if es_top else max(0, 10 - i))
     except Exception:  # noqa: BLE001
         pass
-    # 2) Canciones y 3) videos
-    for filtro, base_bonus, paso in (("songs", 22, 2.0), ("videos", 16, 1.5)):
+    # 2) Canciones, 3) videos y 4) videos con letra (respaldo para celulares)
+    for filtro, q, base_bonus, paso in (("songs", consulta, 22, 2.0), ("videos", consulta, 16, 1.5),
+                                        ("videos", f"{consulta} letra", 0, 0)):
         try:
-            crudos = yt.search(consulta, filter=filtro, limit=MAX_RESULTADOS * 2) or []
+            crudos = yt.search(q, filter=filtro, limit=MAX_RESULTADOS * 2) or []
         except Exception:  # noqa: BLE001
             crudos = []
         for i, item in enumerate(crudos):
@@ -692,11 +712,11 @@ def buscar_canciones(consulta: str):
 
     # Comprueba qué versiones se pueden reproducir en cualquier dispositivo
     revisar = grupos[:MAX_VERIFICAR]
-    estado = verificar_lote([c["video_id"] for g in revisar for c in g[:4]])
+    estado = verificar_lote([c["video_id"] for g in revisar for c in g[:6]])
 
     def armar(g, elegido):
         rep = g[0]
-        otros = [c["video_id"] for c in g[:4]
+        otros = [c["video_id"] for c in g[:6]
                  if c is not elegido and estado.get(c["video_id"]) is not False]
         return {
             "video_id": elegido["video_id"],
@@ -711,9 +731,9 @@ def buscar_canciones(consulta: str):
     resultados = []
     for g in revisar:
         malos = malos_en_movil()
-        jugables = sorted((c for c in g[:4] if estado.get(c["video_id"]) is True),
+        jugables = sorted((c for c in g[:6] if estado.get(c["video_id"]) is True),
                           key=lambda c: c["video_id"] in malos)
-        dudosos = [c for c in g[:4] if estado.get(c["video_id"]) is None]
+        dudosos = [c for c in g[:6] if estado.get(c["video_id"]) is None]
         elegido = (jugables or dudosos or [None])[0]
         if elegido:
             resultados.append(armar(g, elegido))
@@ -788,7 +808,8 @@ def buscar_versiones(titulo: str, artista: str, video_id: str, dur: int) -> list
 
 
 def ordenar_por_confianza(vids: list[str]) -> list[str]:
-    estado, malos = verificar_lote(vids), malos_en_movil()
+    estado, malos, probados = verificar_lote(vids), malos_en_movil(), buenos_en_movil()
+    vids = sorted(vids, key=lambda v: v not in probados)  # primero las probadas en celular
     buenos = [v for v in vids if estado.get(v) is True and v not in malos]
     dudosos = [v for v in vids if estado.get(v) is None and v not in malos]
     reportados = [v for v in vids if v in malos and estado.get(v) is not False]
@@ -860,6 +881,11 @@ def on_cmd(es_host: bool):
     if not isinstance(cmd, dict):
         return
     c = cmd.get("c")
+    if c == "probe":
+        movil = bool(cmd.get("m"))
+        registrar_buenos(cmd.get("ok") if isinstance(cmd.get("ok"), list) else [], movil)
+        registrar_fallos(cmd.get("bad") if isinstance(cmd.get("bad"), dict) else {}, movil)
+        return
     if c in ("more", "fail"):
         fallos = cmd.get("fails") if isinstance(cmd.get("fails"), dict) else {}
         registrar_fallos(fallos, bool(cmd.get("m")))
@@ -876,7 +902,9 @@ def on_cmd(es_host: bool):
 def estado_codificado() -> str:
     e = room.estado()
     malos = malos_en_movil()
+    buenos = buenos_en_movil()
     e["bad"] = [v for v in [e["vid"], *e["alts"]] if v and v in malos]
+    e["good"] = [v for v in [e["vid"], *e["alts"]] if v and v in buenos]
     return base64.b64encode(json.dumps(e, ensure_ascii=False).encode()).decode()
 
 
@@ -1388,8 +1416,12 @@ PLAYER_TEMPLATE = r"""
   function candidates(s) {
     const all = [s.vid].concat(s.alts || []).filter((v, i, a) => v && a.indexOf(v) === i);
     if (!MOBILE) return all;
-    const bad = new Set(s.bad || []);
-    return all.filter((v) => !bad.has(v)).concat(all.filter((v) => bad.has(v)));
+    const bad = new Set(s.bad || []), good = new Set(s.good || []);
+    let local = {};
+    try { local = JSON.parse(localStorage.getItem('mn_probe') || '{}'); } catch (e) {}
+    const rank = (v) => (local[v] && local[v][0] === 1) || good.has(v) ? 0
+                      : (local[v] && local[v][0] === 0) || bad.has(v) ? 2 : 1;
+    return all.slice().sort((a, b) => rank(a) - rank(b));
   }
 
   function loadCandidate(vid) {
@@ -1624,6 +1656,216 @@ PLAYER_TEMPLATE = r"""
 
 
 # =========================================================
+# VERIFICADOR DE RESULTADOS (prueba cada canción en ESTE dispositivo)
+# =========================================================
+# Carga cada video en reproductores ocultos y silenciados. Si YouTube lo
+# bloquea aquí (error 101/150/100) se prueba la siguiente versión del mismo
+# tema; si ninguna funciona, la canción se oculta de los resultados.
+PROBE_TEMPLATE = r"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+  #msg { text-align: center; font-size: 12px; color: #8a8a95; padding: 8px 4px 0; white-space: nowrap;
+         overflow: hidden; text-overflow: ellipsis; }
+  #msg.warn { color: #ffb020; }
+  #pool { position: fixed; left: 0; top: 0; width: 200px; height: 200px; opacity: 0.01; pointer-events: none; z-index: -1; }
+  #pool iframe { position: absolute; left: 0; top: 0; width: 200px; height: 200px; border: 0; }
+</style>
+</head>
+<body>
+<div id="msg">Comprobando qué canciones se pueden escuchar…</div>
+<div id="pool"></div>
+<script>
+  const ROWS = __ROWS__;
+  const P = window.parent.document;
+  const MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+  const WORKERS = 3, TIMEOUT_MS = 9000, TTL_MS = 24 * 3600 * 1000;
+  const msg = document.getElementById('msg');
+
+  // ---------- Caché local por dispositivo: vid → [1 ok | 0 bloqueado, fecha] ----------
+  let cache = {};
+  try { cache = JSON.parse(localStorage.getItem('mn_probe') || '{}'); } catch (e) {}
+  const t0 = Date.now();
+  for (const v in cache) if (!cache[v] || t0 - cache[v][1] > TTL_MS) delete cache[v];
+  function save() { try { localStorage.setItem('mn_probe', JSON.stringify(cache)); } catch (e) {} }
+
+  // ---------- Estado de cada fila: 'pending' | 'ok' | 'bad' ----------
+  const rowState = {};
+  ROWS.forEach((r) => { rowState[r.k] = 'pending'; });
+
+  function rowEl(k) {
+    try { return P.querySelector('.st-key-' + CSS.escape(k)); } catch (e) { return null; }
+  }
+  function paintRows() {
+    ROWS.forEach((r) => {
+      const el = rowEl(r.k);
+      if (!el) return;
+      const st = rowState[r.k];
+      el.style.display = st === 'bad' ? 'none' : '';
+      el.style.opacity = st === 'pending' ? '0.4' : '';
+      el.style.pointerEvents = st === 'pending' ? 'none' : '';
+      el.title = st === 'pending' ? 'Comprobando si se puede reproducir…' : '';
+    });
+  }
+  setInterval(paintRows, 400);  // Streamlit puede redibujar las filas: se reaplica
+
+  // ---------- Reportes al servidor (canal oculto) ----------
+  const okVids = [], badVids = {};
+  function sendCmd(cmd) {
+    const input = P.querySelector('.st-key-mn_cmd input');
+    if (!input) return;
+    cmd.n = Math.random().toString(36).slice(2);
+    const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, JSON.stringify(cmd));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+  }
+
+  // ---------- Cola de trabajo: una fila a la vez por reproductor ----------
+  const queue = ROWS.map((r) => ({ k: r.k, vids: r.v.slice(), i: 0 }));
+  let done = 0;
+
+  function finishRow(job, state) {
+    rowState[job.k] = state;
+    done++;
+    paintRows();
+    const visibles = ROWS.filter((r) => rowState[r.k] !== 'bad').length;
+    if (done >= ROWS.length) {
+      if (!visibles) {
+        msg.className = 'warn';
+        msg.textContent = '⚠️ YouTube no deja reproducir estas canciones aquí. Prueba otra búsqueda.';
+      } else {
+        const ocultas = ROWS.length - visibles;
+        msg.textContent = ocultas ? '✓ Solo se muestran canciones disponibles (' + ocultas + ' ocultas)' : '';
+      }
+      if (okVids.length || Object.keys(badVids).length) {
+        sendCmd({ c: 'probe', ok: okVids, bad: badVids, m: MOBILE });
+      }
+    } else {
+      msg.textContent = 'Comprobando qué canciones se pueden escuchar… ' + done + '/' + ROWS.length;
+    }
+  }
+
+  // Resuelve con la caché local, sin cargar nada, si se puede
+  function resolveFromCache(job) {
+    while (job.i < job.vids.length) {
+      const c = cache[job.vids[job.i]];
+      if (!c) return false;            // hay que probarlo de verdad
+      if (c[0] === 1) { finishRow(job, 'ok'); return true; }
+      job.i++;                          // bloqueado: siguiente versión
+    }
+    finishRow(job, 'bad');
+    return true;
+  }
+
+  // ---------- Reproductores de prueba ----------
+  const ORIGIN = (() => {
+    try { const o = window.parent.location.origin; if (o && o !== 'null') return o; } catch (e) {}
+    return '';
+  })();
+  const REFERRER = (() => {
+    try { return window.parent.location.href.split('#')[0]; } catch (e) {}
+    return ORIGIN ? ORIGIN + '/' : '';
+  })();
+
+  const workers = [];
+  function makeWorker(n) {
+    const f = document.createElement('iframe');
+    f.id = 'probe' + n;
+    f.setAttribute('allow', 'autoplay; encrypted-media');
+    f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    f.src = 'https://www.youtube.com/embed/?enablejsapi=1&autoplay=1&mute=1&controls=0&disablekb=1&fs=0&rel=0' +
+            '&playsinline=1&iv_load_policy=3' + (ORIGIN ? '&origin=' + encodeURIComponent(ORIGIN) : '') +
+            (REFERRER ? '&widget_referrer=' + encodeURIComponent(REFERRER) : '');
+    document.getElementById('pool').appendChild(f);
+    const w = { player: null, job: null, vid: '', timer: null, busy: false };
+    w.player = new YT.Player(f.id, {
+      events: {
+        onReady: () => { try { w.player.mute(); } catch (e) {} next(w); },
+        onStateChange: (e) => { if (w.busy && (e.data === 1)) result(w, true); },
+        onError: (e) => {
+          if (!w.busy) return;
+          const code = e && e.data;
+          // 100/101/150: el video no existe o el dueño bloquea la reproducción aquí
+          if (code === 100 || code === 101 || code === 150) result(w, false, code);
+          else result(w, null);  // otros errores no dicen nada del video
+        },
+      },
+    });
+    workers.push(w);
+  }
+
+  function result(w, ok, code) {
+    if (!w.busy) return;
+    w.busy = false;
+    clearTimeout(w.timer);
+    try { w.player.stopVideo(); } catch (e) {}
+    const job = w.job, vid = w.vid;
+    if (ok === true) {
+      cache[vid] = [1, Date.now()]; save();
+      okVids.push(vid);
+      finishRow(job, 'ok');
+    } else if (ok === false) {
+      cache[vid] = [0, Date.now()]; save();
+      badVids[vid] = code;
+      job.i++;
+      if (!resolveFromCache(job)) { probe(w, job); return; }  // siguiente versión
+    } else {
+      finishRow(job, 'ok');  // no concluyente: no se oculta
+    }
+    next(w);
+  }
+
+  function probe(w, job) {
+    w.job = job;
+    w.vid = job.vids[job.i];
+    w.busy = true;
+    try { w.player.mute(); w.player.loadVideoById({ videoId: w.vid, startSeconds: 30 }); }
+    catch (e) { result(w, null); return; }
+    clearTimeout(w.timer);
+    w.timer = setTimeout(() => result(w, null), TIMEOUT_MS);
+  }
+
+  function next(w) {
+    while (queue.length) {
+      const job = queue.shift();
+      if (resolveFromCache(job)) continue;
+      probe(w, job);
+      return;
+    }
+  }
+
+  // Primero lo que ya se sabe en este dispositivo
+  for (let i = queue.length - 1; i >= 0; i--) {
+    if (resolveFromCache(queue[i])) queue.splice(i, 1);
+  }
+  paintRows();
+
+  if (queue.length) {
+    window.onYouTubeIframeAPIReady = () => {
+      for (let n = 0; n < Math.min(WORKERS, queue.length); n++) makeWorker(n);
+    };
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(tag);
+    // Si la API de YouTube ni siquiera carga, no se esconde nada
+    setTimeout(() => {
+      if (!workers.length) {
+        queue.splice(0).forEach((job) => finishRow(job, 'ok'));
+      }
+    }, 15000);
+  }
+</script>
+</body>
+</html>
+"""
+
+# =========================================================
 # FRAGMENTOS EN VIVO
 # =========================================================
 @st.fragment(run_every=REFRESCO_ESTADO)
@@ -1777,6 +2019,11 @@ if st.session_state.current_query:
         st.markdown("<div class='mn-empty'>Sin resultados para tu búsqueda.</div>", unsafe_allow_html=True)
     else:
         en_cola = room.ids_pendientes()
+        # Este mismo dispositivo prueba en silencio cada resultado y oculta
+        # los que YouTube no deja reproducir aquí.
+        filas_probar = [{"k": f"li-r-{r['video_id']}", "v": [r["video_id"], *r.get("cands", [])][:6]}
+                        for r in resultados]
+        incrustar_html(PROBE_TEMPLATE.replace("__ROWS__", json.dumps(filas_probar)), 34)
         # Mini scroll: muestra hasta 10 resultados dentro de una caja desplazable
         with st.container(height=ALTO_RESULTADOS, border=False, key="results_scroll"):
             for r in resultados:
