@@ -1225,8 +1225,9 @@ PLAYER_TEMPLATE = r"""
   let S = null, rawPrev = '', offset = null;
   let player = null, ready = false, loadedToken = '', lastSeekAt = 0;
   let needTap = false, seeking = false, endedSent = '', watchdog = null;
-  let curVid = '', tried = new Set(), retried = false, gaveUp = false, noticeKind = '';
-  let fails = {}, reported = false, waitingMore = false, moreRounds = 0, moreRev = 0, moreTimer = null;
+  let curVid = '', tried = new Set(), gaveUp = false, noticeKind = '';
+  let fails = {}, reported = false, waitingMore = false, askedMore = false, moreRev = 0, moreTimer = null;
+  let softErrors = 0, rebuilt = false, recovering = false;
   const MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
   let listening = AUTO;
   try { if (!AUTO && localStorage.getItem('mn_listen') === '1') listening = true; } catch (e) {}
@@ -1349,46 +1350,66 @@ PLAYER_TEMPLATE = r"""
     try { if (location.origin && location.origin !== 'null') return location.origin; } catch (e) {}
     return '';
   })();
-  const REFERRER = (() => {
-    try { return window.parent.location.href.split('#')[0]; } catch (e) {}
-    return ORIGIN ? ORIGIN + '/' : '';
-  })();
-  const ytFrame = document.createElement('iframe');
-  ytFrame.id = 'yt-player';
-  ytFrame.width = '200'; ytFrame.height = '200';
-  ytFrame.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
-  ytFrame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-  ytFrame.setAttribute('title', 'Reproductor');
-  ytFrame.src = 'https://www.youtube.com/embed/?enablejsapi=1&autoplay=1&controls=0&disablekb=1&fs=0&rel=0' +
-                '&playsinline=1&iv_load_policy=3' + (ORIGIN ? '&origin=' + encodeURIComponent(ORIGIN) : '') +
-                (REFERRER ? '&widget_referrer=' + encodeURIComponent(REFERRER) : '');
-  $('yt').appendChild(ytFrame);
 
-  const tag = document.createElement('script');
-  tag.src = 'https://www.youtube.com/iframe_api';
-  document.head.appendChild(tag);
+  // Errores que significan "ESTE video está bloqueado aquí". Cualquier otro
+  // error (5, 2, 152, 153…) es un tropiezo del reproductor: se reintenta el
+  // mismo video y, si sigue, se reinicia el reproductor. Nunca se busca otra
+  // versión ni se salta la canción por esos errores.
+  const BLOCKED = new Set([100, 101, 150]);
 
-  window.onYouTubeIframeAPIReady = function () {
+  function makeFrame() {
+    const f = document.createElement('iframe');
+    f.id = 'yt-player';
+    f.width = '200'; f.height = '200';
+    f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
+    f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    f.setAttribute('title', 'Reproductor');
+    f.src = 'https://www.youtube.com/embed/?enablejsapi=1&autoplay=1&controls=0&disablekb=1&fs=0&rel=0' +
+            '&playsinline=1&iv_load_policy=3' + (ORIGIN ? '&origin=' + encodeURIComponent(ORIGIN) : '');
+    $('yt').innerHTML = '';
+    $('yt').appendChild(f);
+  }
+
+  function buildPlayer() {
+    ready = false;
+    try { if (player && player.destroy) player.destroy(); } catch (e) {}
+    makeFrame();
     player = new YT.Player('yt-player', {
       events: {
-        onReady: () => { ready = true; player.setVolume(+$('volume').value); follow(); },
+        onReady: () => {
+          ready = true;
+          player.setVolume(+$('volume').value);
+          // Si había una canción a medias, se vuelve a cargar en el reproductor nuevo
+          if (loadedToken && S && S.token === loadedToken && curVid && listening) {
+            player.loadVideoById({ videoId: curVid, startSeconds: targetPos(S) });
+            lastSeekAt = now();
+            armWatchdog();
+          } else {
+            follow();
+          }
+        },
         onStateChange: onState,
         onError: onError,
       },
     });
-  };
+  }
+
+  const tag = document.createElement('script');
+  tag.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
+  window.onYouTubeIframeAPIReady = buildPlayer;
 
   // Mantiene este dispositivo alineado con el reloj del servidor
   function follow() {
     if (!player || !ready || !listening || !S) return;
     const s = S;
     if (!s.token) {
-      if (loadedToken) { loadedToken = ''; player.stopVideo(); hideUnlock(); }
+      if (loadedToken) { loadedToken = ''; player.stopVideo(); hideUnlock(); setNotice(''); }
       return;
     }
     const t = targetPos(s);
     if (s.token !== loadedToken) { startTrack(s, t); return; }
-    if (needTap || gaveUp || waitingMore) return;
+    if (needTap || gaveUp || waitingMore || recovering) return;
     const st = player.getPlayerState();
     if (s.paused) {
       if (st === 1 || st === 3) player.pauseVideo();
@@ -1411,12 +1432,11 @@ PLAYER_TEMPLATE = r"""
     }
   }
 
-  // Orden de versiones a probar en ESTE dispositivo. En celulares, las que
-  // otro celular ya reportó como bloqueadas van al final.
+  // Orden de versiones a probar en ESTE dispositivo: primero las que ya se
+  // sabe que funcionan aquí, al final las que se sabe que están bloqueadas.
   function candidates(s) {
     const all = [s.vid].concat(s.alts || []).filter((v, i, a) => v && a.indexOf(v) === i);
-    if (!MOBILE) return all;
-    const bad = new Set(s.bad || []), good = new Set(s.good || []);
+    const bad = new Set(MOBILE ? (s.bad || []) : []), good = new Set(MOBILE ? (s.good || []) : []);
     let local = {};
     try { local = JSON.parse(localStorage.getItem('mn_probe') || '{}'); } catch (e) {}
     const rank = (v) => (local[v] && local[v][0] === 1) || good.has(v) ? 0
@@ -1426,7 +1446,7 @@ PLAYER_TEMPLATE = r"""
 
   function loadCandidate(vid) {
     curVid = vid;
-    retried = false;
+    softErrors = 0;
     player.loadVideoById({ videoId: vid, startSeconds: targetPos(S) });
     lastSeekAt = now();
     armWatchdog();
@@ -1439,10 +1459,12 @@ PLAYER_TEMPLATE = r"""
     tried = new Set();
     fails = {};
     reported = false;
-    retried = false;
+    softErrors = 0;
+    rebuilt = false;
+    recovering = false;
     gaveUp = false;
     waitingMore = false;
-    moreRounds = 0;
+    askedMore = false;
     clearTimeout(moreTimer);
     setNotice('');
     curVid = candidates(s)[0] || s.vid;
@@ -1452,12 +1474,17 @@ PLAYER_TEMPLATE = r"""
   }
 
   function onState(e) {
-    if (e.data === 1 && noticeKind === 'trying') setNotice('');
-    if (e.data === 1 && !player.isMuted()) hideUnlock();
-    // Si sonó gracias a otra versión, se avisa al servidor cuáles fallaron
-    if (e.data === 1 && !reported && Object.keys(fails).length && S && S.token === loadedToken) {
-      reported = true;
-      sendCmd({ c: 'fail', tok: loadedToken, fails: fails, m: MOBILE });
+    if (e.data === 1) {
+      softErrors = 0;
+      if (noticeKind === 'trying') setNotice('');
+      if (!player.isMuted()) hideUnlock();
+      try { localStorage.setItem('mn_probe', JSON.stringify(Object.assign(
+        JSON.parse(localStorage.getItem('mn_probe') || '{}'), { [curVid]: [1, Date.now()] }))); } catch (err) {}
+      // Si sonó gracias a otra versión, se avisa al servidor cuáles fallaron
+      if (!reported && Object.keys(fails).length && S && S.token === loadedToken) {
+        reported = true;
+        sendCmd({ c: 'fail', tok: loadedToken, fails: fails, m: MOBILE });
+      }
     }
     if (e.data === 0 && S && S.token === loadedToken && endedSent !== loadedToken) {
       endedSent = loadedToken;
@@ -1465,30 +1492,46 @@ PLAYER_TEMPLATE = r"""
     }
   }
 
-  // Si un video falla (muy común en celulares por restricciones del dueño),
-  // se prueban otras versiones del mismo tema SOLO en este dispositivo y,
-  // si se acaban, se le pide al servidor que busque más.
   function onError(e) {
-    if (!loadedToken || !S || S.token !== loadedToken || gaveUp || waitingMore || endedSent === loadedToken) return;
+    if (!loadedToken || !S || S.token !== loadedToken || gaveUp || waitingMore || recovering) return;
+    if (endedSent === loadedToken) return;
     const code = e && e.data;
     const tok = loadedToken;
 
-    // Error 5 (fallo interno del reproductor HTML5): suele arreglarse reintentando
-    if (code === 5 && !retried) {
-      retried = true;
-      setTimeout(() => {
-        if (S && S.token === tok && !gaveUp) {
-          player.loadVideoById({ videoId: curVid, startSeconds: targetPos(S) });
-          lastSeekAt = now();
-        }
-      }, 800);
+    // ---- Tropiezo del reproductor: reintentar el MISMO video ----
+    if (!BLOCKED.has(code)) {
+      softErrors++;
+      recovering = true;
+      if (softErrors <= 2) {
+        setTimeout(() => {
+          recovering = false;
+          if (S && S.token === tok && !gaveUp) {
+            player.loadVideoById({ videoId: curVid, startSeconds: targetPos(S) });
+            lastSeekAt = now();
+            armWatchdog();
+          }
+        }, 1200 * softErrors);
+      } else if (!rebuilt) {
+        rebuilt = true;  // reproductor nuevo desde cero (una vez por canción)
+        setNotice('Reiniciando el reproductor…', 'trying');
+        setTimeout(() => { recovering = false; softErrors = 0; buildPlayer(); }, 800);
+      } else {
+        recovering = false;
+        tried.add(curVid);  // tampoco funcionó así: se prueba otra versión
+        fails[curVid] = code;
+        if (!tryNext()) giveUp(code);
+      }
       return;
     }
 
+    // ---- Video bloqueado aquí: probar otra versión ----
     tried.add(curVid);
     fails[curVid] = code;
+    try { localStorage.setItem('mn_probe', JSON.stringify(Object.assign(
+      JSON.parse(localStorage.getItem('mn_probe') || '{}'), { [curVid]: [0, Date.now()] }))); } catch (err) {}
     if (tryNext()) return;
-    askMore();
+    if (!askedMore) { askMore(); return; }
+    giveUp(code);
   }
 
   function tryNext() {
@@ -1499,46 +1542,52 @@ PLAYER_TEMPLATE = r"""
     return true;
   }
 
+  // Se pide UNA sola vez por canción y con tiempo límite: nunca queda en bucle
   function askMore() {
-    if (moreRounds >= 3) { giveUp(); return; }
-    moreRounds++;
+    askedMore = true;
     waitingMore = true;
     moreRev = S.alts_rev || 0;
     setNotice('Buscando otra versión de la canción…', 'trying');
     sendCmd({ c: 'more', tok: loadedToken, tried: Array.from(tried), fails: fails, m: MOBILE });
     clearTimeout(moreTimer);
-    moreTimer = setTimeout(() => { if (waitingMore) { waitingMore = false; if (!tryNext()) askMore(); } }, 25000);
+    moreTimer = setTimeout(() => {
+      if (!waitingMore) return;
+      waitingMore = false;
+      if (!tryNext()) giveUp(150);
+    }, 15000);
   }
 
   // Revisa si el servidor ya agregó versiones nuevas
   function checkMore() {
     if (!waitingMore || !S || S.token !== loadedToken) return;
-    const hayNueva = candidates(S).some((v) => !tried.has(v));
-    if (hayNueva) {
+    if (candidates(S).some((v) => !tried.has(v))) {
       waitingMore = false;
       clearTimeout(moreTimer);
       tryNext();
     } else if ((S.alts_rev || 0) > moreRev && !S.buscando) {
-      // El servidor terminó de buscar y no encontró nada nuevo: otra ronda
-      waitingMore = false;
+      waitingMore = false;  // terminó de buscar y no encontró nada nuevo
       clearTimeout(moreTimer);
-      askMore();
+      giveUp(150);
     }
   }
 
-  function giveUp() {
+  function giveUp(code) {
     gaveUp = true;
     waitingMore = false;
+    recovering = false;
+    clearTimeout(moreTimer);
     hideUnlock();
+    try { player.stopVideo(); } catch (e) {}
     const tok = loadedToken;
-    const codes = Object.values(fails).join(', ');
-    if (HOST && AUTO) {
-      // El equipo principal del admin (el de los parlantes) sí salta la canción
-      setNotice('⚠️ No se encontró ninguna versión reproducible (error ' + codes + '). Saltando…', 'error');
+    if (HOST && AUTO && BLOCKED.has(code)) {
+      // El equipo de los parlantes salta SOLO si la canción está bloqueada de verdad
+      setNotice('Esta canción no está disponible. Pasando a la siguiente…', 'error');
       endedSent = tok;
       setTimeout(() => sendCmd({ c: 'skip', tok: tok }), 1200);
+    } else if (BLOCKED.has(code)) {
+      setNotice('Esta canción no está disponible en este teléfono; vuelve con la siguiente.', 'error');
     } else {
-      setNotice('⚠️ YouTube no permite esta canción en este dispositivo (error ' + codes + '). Sigue sonando en el equipo principal.', 'error');
+      setNotice('El reproductor tuvo un problema. Toca el vinilo para reintentar.', 'error');
     }
   }
 
@@ -1568,12 +1617,20 @@ PLAYER_TEMPLATE = r"""
       startTrack(S, t);
       return;
     } else {
-      if (gaveUp || waitingMore) return;
+      if (waitingMore || recovering) return;
+      if (gaveUp) { retryTrack(); return; }
       player.seekTo(t, true);
       if (!S.paused) player.playVideo();
     }
     lastSeekAt = now();
     armWatchdog();
+  }
+
+  // Reintento manual (toque en el vinilo) después de un fallo
+  function retryTrack() {
+    if (!S || !S.token || !player || !ready) return;
+    loadedToken = '';
+    startTrack(S, targetPos(S));
   }
 
   function setListening(on) {
@@ -1588,6 +1645,7 @@ PLAYER_TEMPLATE = r"""
       loadedToken = '';
       gaveUp = false;
       waitingMore = false;
+      recovering = false;
       clearTimeout(moreTimer);
       setNotice('');
     }
@@ -1617,7 +1675,10 @@ PLAYER_TEMPLATE = r"""
     }
   }
   $('play').addEventListener('click', togglePlay);
-  $('vinyl').addEventListener('click', () => { if (HOST) togglePlay(); else if (!listening) setListening(true); });
+  $('vinyl').addEventListener('click', () => {
+    if (listening && gaveUp) { player.unMute(); retryTrack(); return; }
+    if (HOST) togglePlay(); else if (!listening) setListening(true);
+  });
   $('prev').addEventListener('click', () => sendCmd({ c: 'prev' }));
   $('next').addEventListener('click', () => sendCmd({ c: 'next' }));
 
@@ -1684,7 +1745,7 @@ PROBE_TEMPLATE = r"""
   const ROWS = __ROWS__;
   const P = window.parent.document;
   const MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
-  const WORKERS = 3, TIMEOUT_MS = 9000, TTL_MS = 24 * 3600 * 1000;
+  const WORKERS = MOBILE ? 1 : 2, TIMEOUT_MS = 8000, TTL_MS = 24 * 3600 * 1000;
   const msg = document.getElementById('msg');
 
   // ---------- Caché local por dispositivo: vid → [1 ok | 0 bloqueado, fecha] ----------
@@ -1746,6 +1807,7 @@ PROBE_TEMPLATE = r"""
       if (okVids.length || Object.keys(badVids).length) {
         sendCmd({ c: 'probe', ok: okVids, bad: badVids, m: MOBILE });
       }
+      shutdown();
     } else {
       msg.textContent = 'Comprobando qué canciones se pueden escuchar… ' + done + '/' + ROWS.length;
     }
@@ -1768,10 +1830,6 @@ PROBE_TEMPLATE = r"""
     try { const o = window.parent.location.origin; if (o && o !== 'null') return o; } catch (e) {}
     return '';
   })();
-  const REFERRER = (() => {
-    try { return window.parent.location.href.split('#')[0]; } catch (e) {}
-    return ORIGIN ? ORIGIN + '/' : '';
-  })();
 
   const workers = [];
   function makeWorker(n) {
@@ -1780,10 +1838,10 @@ PROBE_TEMPLATE = r"""
     f.setAttribute('allow', 'autoplay; encrypted-media');
     f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
     f.src = 'https://www.youtube.com/embed/?enablejsapi=1&autoplay=1&mute=1&controls=0&disablekb=1&fs=0&rel=0' +
-            '&playsinline=1&iv_load_policy=3' + (ORIGIN ? '&origin=' + encodeURIComponent(ORIGIN) : '') +
-            (REFERRER ? '&widget_referrer=' + encodeURIComponent(REFERRER) : '');
+            '&playsinline=1&iv_load_policy=3' + (ORIGIN ? '&origin=' + encodeURIComponent(ORIGIN) : '');
     document.getElementById('pool').appendChild(f);
     const w = { player: null, job: null, vid: '', timer: null, busy: false };
+    if (closed) return;
     w.player = new YT.Player(f.id, {
       events: {
         onReady: () => { try { w.player.mute(); } catch (e) {} next(w); },
@@ -1800,8 +1858,18 @@ PROBE_TEMPLATE = r"""
     workers.push(w);
   }
 
+  // Al terminar se destruyen los reproductores de prueba: en celulares, dejar
+  // reproductores extra abiertos le quita recursos al que suena la música.
+  let closed = false;
+  function shutdown() {
+    if (closed) return;
+    closed = true;
+    workers.forEach((w) => { clearTimeout(w.timer); try { w.player.destroy(); } catch (e) {} });
+    document.getElementById('pool').innerHTML = '';
+  }
+
   function result(w, ok, code) {
-    if (!w.busy) return;
+    if (!w.busy || closed) return;
     w.busy = false;
     clearTimeout(w.timer);
     try { w.player.stopVideo(); } catch (e) {}
