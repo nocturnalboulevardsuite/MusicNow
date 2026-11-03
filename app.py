@@ -10,18 +10,22 @@ Gramola colaborativa en tiempo real con Streamlit + YouTube Music.
 from __future__ import annotations
 
 import base64
+import concurrent.futures as cf
 import hmac
 import html
 import io
 import json
+import math
 import random
 import re
 import threading
 import time
+import unicodedata
 import uuid
 from urllib.parse import quote
 
 import qrcode
+import requests  # ya viene instalado con ytmusicapi
 import streamlit as st
 import streamlit.components.v1 as components
 from ytmusicapi import YTMusic
@@ -55,7 +59,9 @@ ROOM_VERSION = 4
 COOLDOWN_SECONDS = 120
 MAX_RESULTADOS = 10
 ALTO_RESULTADOS = 340  # alto (px) del mini scroll de resultados
-MAX_ALTERNATIVAS = 4  # versiones de respaldo por canción (para celulares)
+MAX_ALTERNATIVAS = 6  # versiones de respaldo por canción (para celulares)
+MAX_VERIFICAR = 14    # grupos de resultados cuya reproducibilidad se comprueba
+EMBED_TTL = 6 * 3600  # cuánto se recuerda si un video se puede incrustar
 MAX_COLA = 100
 REFRESCO_ESTADO = "2s"
 REFRESCO_COLA = "3s"
@@ -345,68 +351,375 @@ def a_segundos(item: dict) -> int:
     return total
 
 
+# ---------- Texto: normalización y detección de versiones ----------
+def normalizar(texto: str) -> str:
+    texto = unicodedata.normalize("NFKD", (texto or "").lower())
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = re.sub(r"[^a-z0-9]+", " ", texto)
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def normalizar_artista(nombre: str) -> str:
+    a = normalizar(nombre)
+    a = re.sub(r"\b(vevo|topic|official|oficial|music)\b", " ", a)
+    a = re.sub(r"vevo$", "", a.replace(" ", ""))
+    return a
+
+
+# Palabras que indican "otra versión" del tema. Solo restan puntos
+# si NO aparecen en lo que buscó la persona.
+VERSION_FUERTE = {
+    "remix", "rmx", "cover", "live", "en vivo", "en directo", "acoustic", "acustico",
+    "karaoke", "instrumental", "sped up", "speed up", "slowed", "reverb", "nightcore",
+    "8d", "bass boosted", "mashup", "bootleg", "flip", "tribute", "tributo", "extended",
+    "vip", "lofi", "lo fi", "parodia", "parody", "reaction", "reaccion", "tutorial",
+}
+VERSION_SUAVE = {"edit", "version", "mix", "mixed", "rework", "dub"}
+PALABRAS_VERSION = sorted(VERSION_FUERTE | VERSION_SUAVE, key=len, reverse=True)
+
+_RE_RUIDO = re.compile(
+    r"[\(\[][^\)\]]*\b(official|oficial|video|audio|lyrics?|letra|visuali[sz]er|hd|hq|4k|"
+    r"explicit|clean|remaster(ed)?|feat|ft|con)\b[^\)\]]*[\)\]]",
+    re.I,
+)
+
+
+def etiquetas_version(texto_norm: str) -> set[str]:
+    return {p for p in PALABRAS_VERSION
+            if re.search(rf"(?<![a-z0-9]){re.escape(p)}(?![a-z0-9])", texto_norm)}
+
+
+def titulo_base(titulo: str, artistas: list[str]) -> str:
+    """'Skrillex - Bangarang feat. Sirah (Official Video)' → 'bangarang'."""
+    t = _RE_RUIDO.sub(" ", titulo or "")
+    partes = re.split(r"\s[-–—]\s", t, maxsplit=1)
+    if len(partes) == 2:
+        izq = normalizar_artista(partes[0])
+        arts = [normalizar_artista(a) for a in artistas if a]
+        if any(a and (a in izq or izq in a) for a in arts):
+            t = partes[1]
+    t = re.split(r"\b(?:feat|ft|featuring)\b\.?", t, maxsplit=1, flags=re.I)[0]
+    return normalizar(t)
+
+
+def a_numero(valor) -> float:
+    """'1.2B' → 1.2e9 · '345M' → 3.45e8 (reproducciones/visitas)."""
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    m = re.match(r"\s*([\d.,]+)\s*([KMB])?", str(valor or ""), re.I)
+    if not m:
+        return 0.0
+    try:
+        num = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return 0.0
+    return num * {"K": 1e3, "M": 1e6, "B": 1e9}.get((m.group(2) or "").upper(), 1)
+
+
+# ---------- ¿Se puede reproducir incrustado en un celular? ----------
+# Muchos videos (sobre todo los "Topic"/audio de sellos grandes) bloquean la
+# reproducción fuera de YouTube. Se comprueba en el servidor ANTES de
+# ofrecerlos, para que ningún dispositivo (admin o invitado) se tope con ellos.
+_EMBED_CACHE: dict[str, tuple[float, bool | None]] = {}
+_EMBED_LOCK = threading.Lock()
+_UA_ANDROID = ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")
+_EMBED_CLIENT_VERSION = "1.20250310.01.00"
+
+
+def _consultar_embed(vid: str) -> bool | None:
+    """True = se puede incrustar · False = bloqueado · None = no se sabe."""
+    # 1) oEmbed: responde 401/403 si el dueño desactivó la inserción
+    try:
+        r = requests.get(
+            "https://www.youtube.com/oembed",
+            params={"url": f"https://www.youtube.com/watch?v={vid}", "format": "json"},
+            headers={"User-Agent": _UA_ANDROID}, timeout=4,
+        )
+        if r.status_code in (401, 403, 404):
+            return False
+    except requests.RequestException:
+        pass
+
+    # 2) Mismo cliente que usa el reproductor incrustado en un teléfono
+    try:
+        r = requests.post(
+            "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+            json={
+                "videoId": vid,
+                "context": {
+                    "client": {
+                        "clientName": "WEB_EMBEDDED_PLAYER",
+                        "clientVersion": _EMBED_CLIENT_VERSION,
+                        "hl": "en", "gl": "CL",
+                        "platform": "MOBILE", "clientFormFactor": "SMALL_FORM_FACTOR",
+                        "osName": "Android", "osVersion": "14", "userAgent": _UA_ANDROID,
+                    },
+                    "thirdParty": {"embedUrl": APP_URL},
+                },
+                "racyCheckOk": False,
+                "contentCheckOk": False,
+            },
+            headers={
+                "User-Agent": _UA_ANDROID,
+                "Origin": "https://www.youtube.com",
+                "X-YouTube-Client-Name": "56",
+                "X-YouTube-Client-Version": _EMBED_CLIENT_VERSION,
+            },
+            timeout=5,
+        )
+        if not r.ok:
+            return None
+        ps = r.json().get("playabilityStatus") or {}
+        estado = ps.get("status")
+        razon = json.dumps(ps, ensure_ascii=False).lower()
+        if estado == "OK":
+            return ps.get("playableInEmbed", True) is not False
+        if "country" in razon or "pais" in razon or "país" in razon:
+            return None  # bloqueo por región del SERVIDOR: en Chile puede funcionar
+        if "bot" in razon:
+            return None  # YouTube pidió verificación al servidor: no concluyente
+        if estado in ("UNPLAYABLE", "ERROR"):
+            return False
+        if estado in ("LOGIN_REQUIRED", "AGE_CHECK_REQUIRED", "CONTENT_CHECK_REQUIRED"):
+            if any(p in razon for p in ("age", "edad", "inappropriate", "inapropiado")):
+                return False  # +18: nunca se reproduce incrustado
+            return None
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def verificar_lote(vids: list[str]) -> dict[str, bool | None]:
+    """Comprueba varios videos en paralelo (con caché en memoria)."""
+    ahora, resultado, faltan = time.time(), {}, []
+    with _EMBED_LOCK:
+        for v in dict.fromkeys(vids):
+            hit = _EMBED_CACHE.get(v)
+            if hit and ahora - hit[0] < EMBED_TTL:
+                resultado[v] = hit[1]
+            else:
+                faltan.append(v)
+    if faltan:
+        with cf.ThreadPoolExecutor(max_workers=min(12, len(faltan))) as ex:
+            for v, ok in zip(faltan, ex.map(_consultar_embed, faltan)):
+                resultado[v] = ok
+        with _EMBED_LOCK:
+            for v in faltan:
+                if resultado[v] is not None:  # lo desconocido se vuelve a intentar
+                    _EMBED_CACHE[v] = (ahora, resultado[v])
+    return resultado
+
+
+# ---------- Búsqueda con ranking por popularidad ----------
+def _a_candidato(item: dict, filtro: str | None) -> dict | None:
+    vid = item.get("videoId")
+    tipo = item.get("resultType") or ("song" if filtro == "songs" else "video")
+    if not vid or tipo not in ("song", "video"):
+        return None
+    lista_artistas = [a["name"] for a in (item.get("artists") or []) if a.get("name")]
+    titulo = item.get("title") or "Canción desconocida"
+    return {
+        "video_id": vid,
+        "title": titulo,
+        "artist": ", ".join(lista_artistas) or item.get("author") or "Artista desconocido",
+        "artistas": lista_artistas,
+        "duration": item.get("duration") or "",
+        "dur": a_segundos(item),
+        "thumbnail": mejor_miniatura(item.get("thumbnails") or []),
+        "tipo": tipo,
+        "views": a_numero(item.get("views") or item.get("plays")),
+        "bonus": 0.0,
+    }
+
+
+def _puntuar(c: dict, q_norm: str, q_tokens: list[str], q_versiones: set[str]) -> float:
+    titulo = normalizar(c["title"])
+    texto = f"{titulo} {normalizar(c['artist'])}"
+    q_junto = q_norm.replace(" ", "")
+
+    # ¿Cuántas palabras de la búsqueda aparecen en título + artista?
+    cobertura = sum(1 for t in q_tokens if t in texto) / max(1, len(q_tokens))
+    s = 45 * cobertura
+
+    # El título "limpio" está contenido en lo que se buscó → coincidencia exacta
+    base = c["base"]
+    if base and base.replace(" ", "") in q_junto:
+        s += 18
+    # El artista está en la búsqueda
+    if any(a and a in q_junto for a in (normalizar_artista(x) for x in c["artistas"] or [c["artist"]])):
+        s += 15
+
+    s += c["bonus"]  # posición que le dio YouTube Music (top result, etc.)
+    s += min(30.0, 3.2 * math.log10(c["views"] + 1))  # popularidad
+
+    # Remixes, covers, en vivo, sped up… solo si la persona los pidió
+    for etiqueta in etiquetas_version(titulo) - q_versiones:
+        s -= 38 if etiqueta in VERSION_FUERTE else 12
+    if c["dur"] > 720 and not q_versiones:
+        s -= 15  # mezclas de 1 hora, compilados…
+    return s
+
+
+def _misma_cancion(a: dict, b: dict) -> bool:
+    if a["base"] != b["base"] or a["tags"] != b["tags"]:
+        return False
+    if a["dur"] and b["dur"] and abs(a["dur"] - b["dur"]) > max(30, a["dur"] * 0.15):
+        return False
+    arts_a = {normalizar_artista(x) for x in a["artistas"]} - {""}
+    arts_b = {normalizar_artista(x) for x in b["artistas"]} - {""}
+    if arts_a and arts_b and not (arts_a & arts_b):
+        texto_b = normalizar(b["title"]).replace(" ", "")
+        return any(x in texto_b for x in arts_a)
+    return True
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def buscar_canciones(consulta: str):
     yt = get_ytmusic()
     if yt is None:
         return None
-    resultados, vistos = [], set()
-    for filtro in ("songs", "videos"):
+
+    q_norm = normalizar(consulta)
+    q_tokens = [t for t in q_norm.split() if len(t) > 1] or q_norm.split()
+    q_versiones = etiquetas_version(q_norm)
+
+    candidatos: dict[str, dict] = {}
+
+    def sumar(item, filtro, bonus):
+        c = _a_candidato(item, filtro)
+        if not c:
+            return
+        previo = candidatos.get(c["video_id"])
+        if previo:
+            previo["bonus"] = max(previo["bonus"], bonus)
+            previo["views"] = max(previo["views"], c["views"])
+        else:
+            c["bonus"] = bonus
+            candidatos[c["video_id"]] = c
+
+    # 1) Búsqueda general: el "Resultado principal" suele ser el tema original y popular
+    try:
+        for i, item in enumerate(yt.search(consulta, limit=20) or []):
+            es_top = (item.get("category") or "").lower() in ("top result", "resultado principal")
+            sumar(item, None, 40 if es_top else max(0, 10 - i))
+    except Exception:  # noqa: BLE001
+        pass
+    # 2) Canciones y 3) videos
+    for filtro, base_bonus, paso in (("songs", 22, 2.0), ("videos", 16, 1.5)):
         try:
             crudos = yt.search(consulta, filter=filtro, limit=MAX_RESULTADOS * 2) or []
-        except Exception:
+        except Exception:  # noqa: BLE001
             crudos = []
-        for item in crudos:
-            vid = item.get("videoId")
-            if not vid or vid in vistos:
-                continue
-            vistos.add(vid)
-            artistas = ", ".join(a["name"] for a in (item.get("artists") or []) if a.get("name"))
-            resultados.append({
-                "video_id": vid,
-                "title": item.get("title") or "Canción desconocida",
-                "artist": artistas or item.get("author") or "Artista desconocido",
-                "duration": item.get("duration") or "",
-                "dur": a_segundos(item),
-                "thumbnail": mejor_miniatura(item.get("thumbnails") or []),
-            })
-            if len(resultados) >= MAX_RESULTADOS:
-                return resultados
+        for i, item in enumerate(crudos):
+            sumar(item, filtro, max(0.0, base_bonus - paso * i))
+
+    if not candidatos:
+        return []
+
+    for c in candidatos.values():
+        c["base"] = titulo_base(c["title"], c["artistas"])
+        c["tags"] = frozenset(etiquetas_version(normalizar(c["title"])))
+        c["score"] = _puntuar(c, q_norm, q_tokens, q_versiones)
+
+    # Agrupa versiones del mismo tema (audio, video oficial, lyric…) en una sola fila
+    grupos: list[list[dict]] = []
+    for c in sorted(candidatos.values(), key=lambda x: x["score"], reverse=True):
+        for g in grupos:
+            if _misma_cancion(g[0], c):
+                g.append(c)
+                break
+        else:
+            grupos.append([c])
+
+    # Comprueba qué versiones se pueden reproducir en cualquier dispositivo
+    revisar = grupos[:MAX_VERIFICAR]
+    estado = verificar_lote([c["video_id"] for g in revisar for c in g[:4]])
+
+    def armar(g, elegido):
+        rep = g[0]
+        otros = [c["video_id"] for c in g[:4]
+                 if c is not elegido and estado.get(c["video_id"]) is not False]
+        return {
+            "video_id": elegido["video_id"],
+            "title": rep["title"],
+            "artist": rep["artist"],
+            "duration": elegido["duration"] or rep["duration"],
+            "dur": elegido["dur"] or rep["dur"],
+            "thumbnail": rep["thumbnail"] or elegido["thumbnail"],
+            "cands": otros,
+        }
+
+    resultados = []
+    for g in revisar:
+        jugables = [c for c in g[:4] if estado.get(c["video_id"]) is True]
+        dudosos = [c for c in g[:4] if estado.get(c["video_id"]) is None]
+        elegido = (jugables or dudosos or [None])[0]
+        if elegido:
+            resultados.append(armar(g, elegido))
+        if len(resultados) >= MAX_RESULTADOS:
+            break
+
+    # Si YouTube bloqueó todas las comprobaciones, mejor mostrar algo que nada
+    if not resultados:
+        resultados = [armar(g, g[0]) for g in grupos[:MAX_RESULTADOS]]
     return resultados
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def buscar_alternativas(titulo: str, artista: str, video_id: str, dur: int) -> list[str]:
-    """Otras versiones del mismo tema (audio oficial, video, lyric...).
-    Muchos videos tienen la reproducción incrustada bloqueada en celulares;
-    si una falla, el reproductor del teléfono prueba la siguiente."""
+def buscar_versiones(titulo: str, artista: str, video_id: str, dur: int) -> list[str]:
+    """Otras subidas del MISMO tema (video oficial, lyric video, audio…),
+    descartando remixes/covers y duraciones muy distintas."""
     yt = get_ytmusic()
     if yt is None:
         return []
-    if artista in ("Artista desconocido",):
-        artista = ""
-    consulta = f"{titulo} {artista}".strip()
-    alternativas, vistos = [], {video_id}
-    for filtro in ("songs", "videos", None):
+    artistas = [a.strip() for a in artista.split(",") if a.strip() and a != "Artista desconocido"]
+    base = titulo_base(titulo, artistas)
+    if not base:
+        return []
+    tags_orig = etiquetas_version(normalizar(titulo))
+    principal = normalizar_artista(artistas[0]) if artistas else ""
+    consulta = f"{artistas[0] if artistas else ''} {base}".strip()
+
+    vistos, salida = {video_id}, []
+    busquedas = (("videos", consulta), ("songs", consulta), (None, consulta),
+                 ("videos", f"{consulta} lyrics"))
+    for filtro, q in busquedas:
         try:
-            crudos = (yt.search(consulta, filter=filtro, limit=8) if filtro
-                      else yt.search(consulta, limit=8)) or []
-        except Exception:
+            crudos = (yt.search(q, filter=filtro, limit=10) if filtro else yt.search(q, limit=10)) or []
+        except Exception:  # noqa: BLE001
             crudos = []
         for item in crudos:
-            vid = item.get("videoId")
-            if not vid or vid in vistos:
+            c = _a_candidato(item, filtro)
+            if not c or c["video_id"] in vistos:
                 continue
-            if item.get("resultType") not in (None, "song", "video"):
+            vistos.add(c["video_id"])
+            t_norm = normalizar(c["title"])
+            if etiquetas_version(t_norm) - tags_orig:
+                continue  # es un remix/cover/en vivo: otra canción
+            if not all(p in t_norm for p in base.split()):
                 continue
-            vistos.add(vid)
-            d = a_segundos(item)
-            if dur and d and abs(d - dur) > max(25, dur * 0.12):
-                continue  # duración muy distinta: probablemente otra canción
-            alternativas.append(vid)
-            if len(alternativas) >= MAX_ALTERNATIVAS:
-                return alternativas
-    return alternativas
+            if principal:
+                texto = (t_norm + " " + normalizar(c["artist"])).replace(" ", "")
+                if principal not in texto:
+                    continue  # mismo nombre, otro artista
+            if dur and c["dur"] and abs(c["dur"] - dur) > max(25, dur * 0.12):
+                continue
+            salida.append(c["video_id"])
+    return salida[:12]
+
+
+def preparar_alternativas(resultado: dict) -> list[str]:
+    principal = resultado["video_id"]
+    vids = [v for v in resultado.get("cands", []) if v != principal]
+    for v in buscar_versiones(resultado["title"], resultado["artist"], principal,
+                              int(resultado.get("dur") or 0)):
+        if v not in vids and v != principal:
+            vids.append(v)
+    estado = verificar_lote(vids)
+    buenos = [v for v in vids if estado.get(v) is True]
+    dudosos = [v for v in vids if estado.get(v) is None]
+    return (buenos + dudosos)[:MAX_ALTERNATIVAS]
 
 
 # =========================================================
@@ -414,12 +727,11 @@ def buscar_alternativas(titulo: str, artista: str, video_id: str, dur: int) -> l
 # =========================================================
 def on_agregar(resultado: dict, invitado: str, es_host: bool):
     try:
-        alts = buscar_alternativas(resultado["title"], resultado["artist"],
-                                   resultado["video_id"], int(resultado.get("dur") or 0))
+        alts = preparar_alternativas(resultado)
     except Exception:  # noqa: BLE001
-        alts = []
+        alts = list(resultado.get("cands", []))[:MAX_ALTERNATIVAS]
     cancion = {
-        **resultado,
+        **{k: v for k, v in resultado.items() if k != "cands"},
         "alts": alts,
         "uid": uuid.uuid4().hex,
         "color": random.choice(COLORES),
