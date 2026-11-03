@@ -54,7 +54,7 @@ PIN_POR_DEFECTO = HOST_PIN == "1234"
 
 # Súbelo cada vez que cambies la clase PartyRoom: obliga a Streamlit a crear
 # una sala nueva en vez de reutilizar la antigua guardada en caché.
-ROOM_VERSION = 4
+ROOM_VERSION = 5
 
 COOLDOWN_SECONDS = 120
 MAX_RESULTADOS = 10
@@ -171,6 +171,8 @@ class PartyRoom:
                 "color": actual["color"] if actual else "#ff2222",
                 "dur": actual.get("dur", 0) if actual else 0,
                 "alts": actual.get("alts", []) if actual else [],
+                "alts_rev": actual.get("alts_rev", 0) if actual else 0,
+                "buscando": bool(actual.get("buscando")) if actual else False,
                 "pos": idx + 1,
                 "total": total,
                 "next": siguiente,
@@ -237,6 +239,29 @@ class PartyRoom:
                     self.current_index, self.finished = len(self.playlist) - 1, True
             elif self.current_index >= len(self.playlist):
                 self.current_index = len(self.playlist) - 1
+
+    def pedir_mas_versiones(self, tok: str):
+        """Un dispositivo no pudo con ninguna versión: se buscan más (máx. 3 rondas)."""
+        with self.lock:
+            actual = self._actual()
+            if not actual or tok != self._token() or actual.get("buscando"):
+                return None
+            if actual.get("rondas", 0) >= 3:
+                return None
+            actual["rondas"] = actual.get("rondas", 0) + 1
+            actual["buscando"] = True
+            return dict(actual)
+
+    def sumar_alternativas(self, uid: str, nuevos: list[str]):
+        with self.lock:
+            idx = self._indice(uid)
+            if idx is None:
+                return
+            c = self.playlist[idx]
+            existentes = {c["video_id"], *c.get("alts", [])}
+            c["alts"] = c.get("alts", []) + [v for v in nuevos if v not in existentes]
+            c["buscando"] = False
+            c["alts_rev"] = c.get("alts_rev", 0) + 1
 
     def limpiar(self):
         with self.lock:
@@ -420,8 +445,40 @@ def a_numero(valor) -> float:
 # Muchos videos (sobre todo los "Topic"/audio de sellos grandes) bloquean la
 # reproducción fuera de YouTube. Se comprueba en el servidor ANTES de
 # ofrecerlos, para que ningún dispositivo (admin o invitado) se tope con ellos.
-_EMBED_CACHE: dict[str, tuple[float, bool | None]] = {}
-_EMBED_LOCK = threading.Lock()
+@st.cache_resource
+def _memoria() -> dict:
+    """Vive mientras la app esté encendida (las variables normales del script
+    se reinician en cada recarga de Streamlit)."""
+    return {"lock": threading.Lock(), "embed": {}, "malos_movil": {}}
+
+
+MEM = _memoria()  # se usa también desde hilos en segundo plano
+
+
+def malos_en_movil() -> set[str]:
+    """Videos que algún celular ya reportó como bloqueados (error 101/150)."""
+    mem, limite = MEM, time.time() - 24 * 3600
+    with mem["lock"]:
+        return {v for v, t in mem["malos_movil"].items() if t > limite}
+
+
+def registrar_fallos(fallos: dict, movil: bool):
+    mem = MEM
+    with mem["lock"]:
+        for vid, codigo in list(fallos.items())[:12]:
+            if not isinstance(vid, str) or not re.fullmatch(r"[\w-]{11}", vid):
+                continue
+            try:
+                codigo = int(codigo)
+            except (TypeError, ValueError):
+                continue
+            if codigo in (100, 101, 150):
+                if movil:
+                    mem["malos_movil"][vid] = time.time()
+                else:
+                    mem["embed"][vid] = (time.time(), False)
+
+
 _UA_ANDROID = ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")
 _EMBED_CLIENT_VERSION = "1.20250310.01.00"
@@ -492,10 +549,11 @@ def _consultar_embed(vid: str) -> bool | None:
 
 def verificar_lote(vids: list[str]) -> dict[str, bool | None]:
     """Comprueba varios videos en paralelo (con caché en memoria)."""
+    mem = MEM
     ahora, resultado, faltan = time.time(), {}, []
-    with _EMBED_LOCK:
+    with mem["lock"]:
         for v in dict.fromkeys(vids):
-            hit = _EMBED_CACHE.get(v)
+            hit = mem["embed"].get(v)
             if hit and ahora - hit[0] < EMBED_TTL:
                 resultado[v] = hit[1]
             else:
@@ -504,10 +562,10 @@ def verificar_lote(vids: list[str]) -> dict[str, bool | None]:
         with cf.ThreadPoolExecutor(max_workers=min(12, len(faltan))) as ex:
             for v, ok in zip(faltan, ex.map(_consultar_embed, faltan)):
                 resultado[v] = ok
-        with _EMBED_LOCK:
+        with mem["lock"]:
             for v in faltan:
                 if resultado[v] is not None:  # lo desconocido se vuelve a intentar
-                    _EMBED_CACHE[v] = (ahora, resultado[v])
+                    mem["embed"][v] = (ahora, resultado[v])
     return resultado
 
 
@@ -652,7 +710,9 @@ def buscar_canciones(consulta: str):
 
     resultados = []
     for g in revisar:
-        jugables = [c for c in g[:4] if estado.get(c["video_id"]) is True]
+        malos = malos_en_movil()
+        jugables = sorted((c for c in g[:4] if estado.get(c["video_id"]) is True),
+                          key=lambda c: c["video_id"] in malos)
         dudosos = [c for c in g[:4] if estado.get(c["video_id"]) is None]
         elegido = (jugables or dudosos or [None])[0]
         if elegido:
@@ -666,11 +726,12 @@ def buscar_canciones(consulta: str):
     return resultados
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def buscar_versiones(titulo: str, artista: str, video_id: str, dur: int) -> list[str]:
+def _versiones(yt, titulo: str, artista: str, video_id: str, dur: int,
+               amplio: bool = False, excluir=()) -> list[str]:
     """Otras subidas del MISMO tema (video oficial, lyric video, audio…),
-    descartando remixes/covers y duraciones muy distintas."""
-    yt = get_ytmusic()
+    descartando remixes/covers, otros artistas y duraciones muy distintas.
+    amplio=True busca más lejos (letra/lyrics/audio de canales no oficiales,
+    que casi nunca bloquean la reproducción en celulares)."""
     if yt is None:
         return []
     artistas = [a.strip() for a in artista.split(",") if a.strip() and a != "Artista desconocido"]
@@ -681,12 +742,21 @@ def buscar_versiones(titulo: str, artista: str, video_id: str, dur: int) -> list
     principal = normalizar_artista(artistas[0]) if artistas else ""
     consulta = f"{artistas[0] if artistas else ''} {base}".strip()
 
-    vistos, salida = {video_id}, []
-    busquedas = (("videos", consulta), ("songs", consulta), (None, consulta),
-                 ("videos", f"{consulta} lyrics"))
-    for filtro, q in busquedas:
+    if amplio:
+        busquedas = (("videos", f"{consulta} letra", 20), ("videos", f"{consulta} lyrics", 20),
+                     ("videos", f"{consulta} audio", 20), ("videos", f"{base} {consulta}", 20),
+                     (None, f"{consulta} letra", 15))
+        tolerancia = lambda d: max(40, d * 0.2)  # noqa: E731
+    else:
+        busquedas = (("videos", consulta, 10), ("songs", consulta, 10), (None, consulta, 10),
+                     ("videos", f"{consulta} lyrics", 10))
+        tolerancia = lambda d: max(25, d * 0.12)  # noqa: E731
+
+    vistos, salida = {video_id, *excluir}, []
+    for filtro, q, limite in busquedas:
         try:
-            crudos = (yt.search(q, filter=filtro, limit=10) if filtro else yt.search(q, limit=10)) or []
+            crudos = (yt.search(q, filter=filtro, limit=limite) if filtro
+                      else yt.search(q, limit=limite)) or []
         except Exception:  # noqa: BLE001
             crudos = []
         for item in crudos:
@@ -703,10 +773,26 @@ def buscar_versiones(titulo: str, artista: str, video_id: str, dur: int) -> list
                 texto = (t_norm + " " + normalizar(c["artist"])).replace(" ", "")
                 if principal not in texto:
                     continue  # mismo nombre, otro artista
-            if dur and c["dur"] and abs(c["dur"] - dur) > max(25, dur * 0.12):
+            if dur and c["dur"] and abs(c["dur"] - dur) > tolerancia(dur):
                 continue
-            salida.append(c["video_id"])
-    return salida[:12]
+            oficial = bool(re.search(r"\b(official|oficial)\b", t_norm)) or "vevo" in c["artist"].lower()
+            salida.append((oficial if amplio else False, c["video_id"]))
+    # En modo amplio, primero las subidas no oficiales (las más permisivas)
+    salida.sort(key=lambda x: x[0])
+    return [v for _, v in salida][:12]
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def buscar_versiones(titulo: str, artista: str, video_id: str, dur: int) -> list[str]:
+    return _versiones(get_ytmusic(), titulo, artista, video_id, dur)
+
+
+def ordenar_por_confianza(vids: list[str]) -> list[str]:
+    estado, malos = verificar_lote(vids), malos_en_movil()
+    buenos = [v for v in vids if estado.get(v) is True and v not in malos]
+    dudosos = [v for v in vids if estado.get(v) is None and v not in malos]
+    reportados = [v for v in vids if v in malos and estado.get(v) is not False]
+    return buenos + dudosos + reportados
 
 
 def preparar_alternativas(resultado: dict) -> list[str]:
@@ -716,10 +802,21 @@ def preparar_alternativas(resultado: dict) -> list[str]:
                               int(resultado.get("dur") or 0)):
         if v not in vids and v != principal:
             vids.append(v)
-    estado = verificar_lote(vids)
-    buenos = [v for v in vids if estado.get(v) is True]
-    dudosos = [v for v in vids if estado.get(v) is None]
-    return (buenos + dudosos)[:MAX_ALTERNATIVAS]
+    return ordenar_por_confianza(vids)[:MAX_ALTERNATIVAS]
+
+
+def ampliar_alternativas(yt, cancion: dict, ya_probados: list[str]):
+    """Corre en segundo plano cuando un dispositivo agotó todas las versiones."""
+    nuevos: list[str] = []
+    try:
+        excluir = {*ya_probados, *cancion.get("alts", [])}
+        candidatos = _versiones(yt, cancion["title"], cancion["artist"], cancion["video_id"],
+                                int(cancion.get("dur") or 0), amplio=True, excluir=excluir)
+        nuevos = [v for v in ordenar_por_confianza(candidatos) if v not in malos_en_movil()][:8]
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        room.sumar_alternativas(cancion["uid"], nuevos)
 
 
 # =========================================================
@@ -760,12 +857,27 @@ def on_cmd(es_host: bool):
         cmd = json.loads(st.session_state.get("mn_cmd") or "")
     except ValueError:
         return
-    if isinstance(cmd, dict):
-        room.comando(cmd, es_host)
+    if not isinstance(cmd, dict):
+        return
+    c = cmd.get("c")
+    if c in ("more", "fail"):
+        fallos = cmd.get("fails") if isinstance(cmd.get("fails"), dict) else {}
+        registrar_fallos(fallos, bool(cmd.get("m")))
+        if c == "more":
+            cancion = room.pedir_mas_versiones(str(cmd.get("tok", "")))
+            if cancion:
+                probados = [v for v in (cmd.get("tried") or []) if isinstance(v, str)][:20]
+                threading.Thread(target=ampliar_alternativas,
+                                 args=(get_ytmusic(), cancion, probados), daemon=True).start()
+        return
+    room.comando(cmd, es_host)
 
 
 def estado_codificado() -> str:
-    return base64.b64encode(json.dumps(room.estado(), ensure_ascii=False).encode()).decode()
+    e = room.estado()
+    malos = malos_en_movil()
+    e["bad"] = [v for v in [e["vid"], *e["alts"]] if v and v in malos]
+    return base64.b64encode(json.dumps(e, ensure_ascii=False).encode()).decode()
 
 
 # =========================================================
@@ -1086,6 +1198,8 @@ PLAYER_TEMPLATE = r"""
   let player = null, ready = false, loadedToken = '', lastSeekAt = 0;
   let needTap = false, seeking = false, endedSent = '', watchdog = null;
   let curVid = '', tried = new Set(), retried = false, gaveUp = false, noticeKind = '';
+  let fails = {}, reported = false, waitingMore = false, moreRounds = 0, moreRev = 0, moreTimer = null;
+  const MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
   let listening = AUTO;
   try { if (!AUTO && localStorage.getItem('mn_listen') === '1') listening = true; } catch (e) {}
 
@@ -1151,6 +1265,7 @@ PLAYER_TEMPLATE = r"""
     S = s;
     applyUI();
     follow();
+    checkMore();
   }
 
   function applyUI() {
@@ -1206,6 +1321,10 @@ PLAYER_TEMPLATE = r"""
     try { if (location.origin && location.origin !== 'null') return location.origin; } catch (e) {}
     return '';
   })();
+  const REFERRER = (() => {
+    try { return window.parent.location.href.split('#')[0]; } catch (e) {}
+    return ORIGIN ? ORIGIN + '/' : '';
+  })();
   const ytFrame = document.createElement('iframe');
   ytFrame.id = 'yt-player';
   ytFrame.width = '200'; ytFrame.height = '200';
@@ -1213,7 +1332,8 @@ PLAYER_TEMPLATE = r"""
   ytFrame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
   ytFrame.setAttribute('title', 'Reproductor');
   ytFrame.src = 'https://www.youtube.com/embed/?enablejsapi=1&autoplay=1&controls=0&disablekb=1&fs=0&rel=0' +
-                '&playsinline=1&iv_load_policy=3' + (ORIGIN ? '&origin=' + encodeURIComponent(ORIGIN) : '');
+                '&playsinline=1&iv_load_policy=3' + (ORIGIN ? '&origin=' + encodeURIComponent(ORIGIN) : '') +
+                (REFERRER ? '&widget_referrer=' + encodeURIComponent(REFERRER) : '');
   $('yt').appendChild(ytFrame);
 
   const tag = document.createElement('script');
@@ -1240,7 +1360,7 @@ PLAYER_TEMPLATE = r"""
     }
     const t = targetPos(s);
     if (s.token !== loadedToken) { startTrack(s, t); return; }
-    if (needTap || gaveUp) return;
+    if (needTap || gaveUp || waitingMore) return;
     const st = player.getPlayerState();
     if (s.paused) {
       if (st === 1 || st === 3) player.pauseVideo();
@@ -1263,15 +1383,37 @@ PLAYER_TEMPLATE = r"""
     }
   }
 
-  // Carga una canción nueva (versión principal primero)
+  // Orden de versiones a probar en ESTE dispositivo. En celulares, las que
+  // otro celular ya reportó como bloqueadas van al final.
+  function candidates(s) {
+    const all = [s.vid].concat(s.alts || []).filter((v, i, a) => v && a.indexOf(v) === i);
+    if (!MOBILE) return all;
+    const bad = new Set(s.bad || []);
+    return all.filter((v) => !bad.has(v)).concat(all.filter((v) => bad.has(v)));
+  }
+
+  function loadCandidate(vid) {
+    curVid = vid;
+    retried = false;
+    player.loadVideoById({ videoId: vid, startSeconds: targetPos(S) });
+    lastSeekAt = now();
+    armWatchdog();
+  }
+
+  // Carga una canción nueva
   function startTrack(s, t) {
     loadedToken = s.token;
     endedSent = '';
-    curVid = s.vid;
     tried = new Set();
+    fails = {};
+    reported = false;
     retried = false;
     gaveUp = false;
+    waitingMore = false;
+    moreRounds = 0;
+    clearTimeout(moreTimer);
     setNotice('');
+    curVid = candidates(s)[0] || s.vid;
     player.loadVideoById({ videoId: curVid, startSeconds: t });
     lastSeekAt = now();
     armWatchdog();
@@ -1280,15 +1422,22 @@ PLAYER_TEMPLATE = r"""
   function onState(e) {
     if (e.data === 1 && noticeKind === 'trying') setNotice('');
     if (e.data === 1 && !player.isMuted()) hideUnlock();
+    // Si sonó gracias a otra versión, se avisa al servidor cuáles fallaron
+    if (e.data === 1 && !reported && Object.keys(fails).length && S && S.token === loadedToken) {
+      reported = true;
+      sendCmd({ c: 'fail', tok: loadedToken, fails: fails, m: MOBILE });
+    }
     if (e.data === 0 && S && S.token === loadedToken && endedSent !== loadedToken) {
       endedSent = loadedToken;
       sendCmd({ c: 'ended', tok: loadedToken });
     }
   }
+
   // Si un video falla (muy común en celulares por restricciones del dueño),
-  // se prueban otras versiones del mismo tema SOLO en este dispositivo.
+  // se prueban otras versiones del mismo tema SOLO en este dispositivo y,
+  // si se acaban, se le pide al servidor que busque más.
   function onError(e) {
-    if (!loadedToken || !S || S.token !== loadedToken || gaveUp || endedSent === loadedToken) return;
+    if (!loadedToken || !S || S.token !== loadedToken || gaveUp || waitingMore || endedSent === loadedToken) return;
     const code = e && e.data;
     const tok = loadedToken;
 
@@ -1305,27 +1454,59 @@ PLAYER_TEMPLATE = r"""
     }
 
     tried.add(curVid);
-    const next = [S.vid].concat(S.alts || []).find((v) => v && !tried.has(v));
-    if (next) {
-      curVid = next;
-      retried = false;
-      setNotice('Buscando una versión compatible con este dispositivo…', 'trying');
-      player.loadVideoById({ videoId: next, startSeconds: targetPos(S) });
-      lastSeekAt = now();
-      armWatchdog();
-      return;
-    }
+    fails[curVid] = code;
+    if (tryNext()) return;
+    askMore();
+  }
 
-    // Ninguna versión funciona aquí
+  function tryNext() {
+    const next = candidates(S).find((v) => !tried.has(v));
+    if (!next) return false;
+    setNotice('Cargando otra versión para este dispositivo…', 'trying');
+    loadCandidate(next);
+    return true;
+  }
+
+  function askMore() {
+    if (moreRounds >= 3) { giveUp(); return; }
+    moreRounds++;
+    waitingMore = true;
+    moreRev = S.alts_rev || 0;
+    setNotice('Buscando otra versión de la canción…', 'trying');
+    sendCmd({ c: 'more', tok: loadedToken, tried: Array.from(tried), fails: fails, m: MOBILE });
+    clearTimeout(moreTimer);
+    moreTimer = setTimeout(() => { if (waitingMore) { waitingMore = false; if (!tryNext()) askMore(); } }, 25000);
+  }
+
+  // Revisa si el servidor ya agregó versiones nuevas
+  function checkMore() {
+    if (!waitingMore || !S || S.token !== loadedToken) return;
+    const hayNueva = candidates(S).some((v) => !tried.has(v));
+    if (hayNueva) {
+      waitingMore = false;
+      clearTimeout(moreTimer);
+      tryNext();
+    } else if ((S.alts_rev || 0) > moreRev && !S.buscando) {
+      // El servidor terminó de buscar y no encontró nada nuevo: otra ronda
+      waitingMore = false;
+      clearTimeout(moreTimer);
+      askMore();
+    }
+  }
+
+  function giveUp() {
     gaveUp = true;
+    waitingMore = false;
     hideUnlock();
+    const tok = loadedToken;
+    const codes = Object.values(fails).join(', ');
     if (HOST && AUTO) {
       // El equipo principal del admin (el de los parlantes) sí salta la canción
-      setNotice('⚠️ Esta canción no se puede reproducir. Saltando…', 'error');
+      setNotice('⚠️ No se encontró ninguna versión reproducible (error ' + codes + '). Saltando…', 'error');
       endedSent = tok;
       setTimeout(() => sendCmd({ c: 'skip', tok: tok }), 1200);
     } else {
-      setNotice('⚠️ Esta canción no se puede reproducir en este dispositivo. Puedes abrirla en YouTube:', 'error', true);
+      setNotice('⚠️ YouTube no permite esta canción en este dispositivo (error ' + codes + '). Sigue sonando en el equipo principal.', 'error');
     }
   }
 
@@ -1355,7 +1536,7 @@ PLAYER_TEMPLATE = r"""
       startTrack(S, t);
       return;
     } else {
-      if (gaveUp) return;
+      if (gaveUp || waitingMore) return;
       player.seekTo(t, true);
       if (!S.paused) player.playVideo();
     }
@@ -1374,6 +1555,8 @@ PLAYER_TEMPLATE = r"""
       if (player && ready) player.stopVideo();
       loadedToken = '';
       gaveUp = false;
+      waitingMore = false;
+      clearTimeout(moreTimer);
       setNotice('');
     }
     requestAnimationFrame(fit);
